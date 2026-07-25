@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdftranslate-backend"
+version = "0.1.0"
+description = "Local backend for PDFTranslate — high-fidelity PDF translation with BabelDOC."
+readme = "README.md"
+license = { text = "AGPL-3.0-only" }
+authors = [{ name = "PDFTranslate Contributors" }]
+requires-python = ">=3.12"
+keywords = ["pdf", "translation", "babeldoc", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Linguistic",
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "python-multipart>=0.0.18",
+]
+
+[project.urls]
+Homepage = "https://github.com/DragonLYL0718/PDFTranslate"
+Repository = "https://github.com/DragonLYL0718/PDFTranslate"
+Documentation = "https://github.com/DragonLYL0718/PDFTranslate/blob/main/backend/INSTALL.md"
+Issues = "https://github.com/DragonLYL0718/PDFTranslate/issues"
+
+[project.scripts]
+pdftranslate-backend = "pdftranslate_backend:main"
+
+[tool.hatch.version]
+path = "pdftranslate_backend/__init__.py"
+pattern = 'VERSION = "(?P<version>[^"]+)"'
+
+[tool.uv]
+dev-dependencies = []

@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+// PDFTranslate local proxy — forwards AI-provider requests to bypass browser CORS.
+//
+// Why: a page hosted in the browser can only call AI providers that send CORS
+// headers. Providers like self-hosted gateways don't, so the browser blocks them.
+// This tiny relay runs on your machine (no CORS limits) and forwards requests.
+//
+// Privacy: nothing is stored or sent anywhere except to the exact provider URL
+// your app already targets. Traffic only flows browser -> localhost -> provider.
+//
+// Requirements: Node 18+ (built-in fetch). Zero dependencies.
+// Run:  node proxy.mjs           (defaults to port 8788)
+//       PORT=9000 node proxy.mjs
+import http from "node:http";
+
+const PORT = +(process.env.PORT || 8788);
+
+// Only these browser origins may use the proxy (prevents random sites abusing it).
+const ALLOW_ORIGINS = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /\.github\.io$/,
+];
+
+function allowedOrigin(origin) {
+  if (!origin) return "*";
+  return ALLOW_ORIGINS.some((re) => re.test(origin)) ? origin : "";
+}
+
+function setCors(res, origin) {
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin(origin) || "null");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "content-type");
+}
+
+const server = http.createServer(async (req, res) => {
+  const origin = req.headers.origin;
+  setCors(res, origin);
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+
+  if (url.pathname === "/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, name: "pdftranslate-proxy", version: 1 }));
+    return;
+  }
+
+  if (url.pathname === "/proxy" && req.method === "POST") {
+    try {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      const { url: target, method = "GET", headers = {}, body = null } = JSON.parse(
+        Buffer.concat(chunks).toString() || "{}",
+      );
+      if (!target) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "missing target url" }));
+        return;
+      }
+      const upstream = await fetch(target, { method, headers, body: body ?? undefined });
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.writeHead(upstream.status, {
+        "content-type": upstream.headers.get("content-type") || "application/json",
+      });
+      res.end(buf);
+    } catch (e) {
+      res.writeHead(502, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: String(e) }));
+    }
+    return;
+  }
+
+  res.writeHead(404);
+  res.end("not found");
+});
+
+// Try the preferred port; if already in use, proxy is probably already running.
+server.listen(PORT, () => {
+  console.log(`PDFTranslate proxy running on http://localhost:${PORT}`);
+  console.log("Keep this window open while translating. Press Ctrl+C to stop.");
+});
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.log(`Port ${PORT} is already in use — proxy is probably already running.`);
+    console.log("If not, kill the old process or set PORT=xxxx and try again.");
+    process.exit(0); // not an error
+  }
+  console.error(`Failed to start: ${err.message}`);
+  process.exit(1);
+});

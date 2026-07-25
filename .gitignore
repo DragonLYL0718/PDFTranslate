@@ -1,0 +1,40 @@
+# --- Node / frontend ---
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+npm-debug.log*
+yarn-error.log*
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# --- Python / backend ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Local test artifacts (sample PDFs dropped in the repo root) ---
+/*.pdf
+
+# --- Editor / OS ---
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea
+.claude/settings.local.json
+
+CLAUDE.md

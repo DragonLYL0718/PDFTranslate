@@ -1,0 +1,113 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Class-based dark mode (mirrors rayleigh-lin.top) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Static design tokens: fonts, radii, shadows */
+@theme {
+  --font-sans: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-card: 1rem;
+  --radius-control: 0.625rem;
+}
+
+/* Runtime-var color tokens -> Tailwind utilities (bg-*, text-*, border-*) */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-text-1: var(--text-1);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-brand: var(--brand);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-card-hover: var(--shadow-card-hover);
+  --shadow-glow: var(--glow);
+}
+
+/* Light theme (cyan accent on cool blue-gray neutrals, OKLCH) */
+:root {
+  --bg: oklch(0.985 0.005 220);
+  --surface-1: oklch(1 0 0);
+  --surface-2: oklch(0.962 0.008 220);
+  --surface-3: oklch(0.936 0.012 220);
+  --text-1: oklch(0.25 0.03 235);
+  --text-2: oklch(0.45 0.025 235);
+  --text-3: oklch(0.5 0.025 235);
+  --border-subtle: oklch(0.88 0.012 225 / 0.7);
+  --border-strong: oklch(0.8 0.02 225);
+  --accent: oklch(0.6 0.11 215);
+  --accent-strong: oklch(0.5 0.1 220);
+  --accent-soft: oklch(0.6 0.11 215 / 0.1);
+  --brand: oklch(0.32 0.045 235);
+  --glow: 0 0 24px oklch(0.7 0.13 212 / 0.25);
+  --shadow-card: 0 1px 2px oklch(0.3 0.03 235 / 0.06), 0 4px 16px oklch(0.3 0.03 235 / 0.05);
+  --shadow-card-hover: 0 2px 4px oklch(0.3 0.03 235 / 0.08), 0 12px 32px oklch(0.3 0.03 235 / 0.1);
+  color-scheme: light;
+}
+
+/* Dark theme */
+:root.dark {
+  --bg: oklch(0.17 0.022 235);
+  --surface-1: oklch(0.215 0.025 235);
+  --surface-2: oklch(0.255 0.026 235);
+  --surface-3: oklch(0.3 0.027 235);
+  --text-1: oklch(0.93 0.01 220);
+  --text-2: oklch(0.74 0.015 225);
+  --text-3: oklch(0.66 0.015 230);
+  --border-subtle: oklch(0.33 0.02 235 / 0.7);
+  --border-strong: oklch(0.42 0.025 235);
+  --accent: oklch(0.78 0.125 210);
+  --accent-strong: oklch(0.85 0.11 205);
+  --accent-soft: oklch(0.78 0.125 210 / 0.12);
+  --brand: oklch(0.26 0.04 235);
+  --glow: 0 0 28px oklch(0.78 0.125 210 / 0.28);
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 0.3), 0 4px 16px oklch(0 0 0 / 0.28);
+  --shadow-card-hover: 0 2px 4px oklch(0 0 0 / 0.35), 0 12px 32px oklch(0 0 0 / 0.4);
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* Disable theme transition until first paint settles */
+body.preload,
+body.preload * {
+  transition: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+::selection {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+/* Thin, unobtrusive scrollbars */
+.pretty-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
