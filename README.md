@@ -1,61 +1,79 @@
 # PDFTranslate
 
-AI 驱动的 **PDF 翻译器**，尽量保持原文排版与位置（对标 Immersive Translate / BabelDOC 的效果）。**本地优先**：所有文档、翻译、术语库、API Key 都只存在浏览器本地（IndexedDB），不上传云端。
+An AI-powered **PDF translator**, local-first and browser-only.
 
-## 特性
+> This entire project was written by [Claude Code](https://claude.com/claude-code).
 
-- 📄 多方式导入：点击 / 拖拽 / 网络链接 / 本地文件；可选翻译页数范围
-- 🌐 自动识别或手选原文语言，翻译为任意目标语言
-- 🧩 保持排版：文字块原位置重排叠加，左右对照 / 仅译文 / 仅原文
-- 📚 术语库：两种引擎都会在翻译时自动抽取专有名词，可指定收录到哪个术语库（含默认库），可编辑并按区域重新生成
-- 💾 翻译记忆缓存：相同段落不重复翻译，省费提速（可在设置清除）
-- 🔌 像 cc switch 一样配置多个 AI 提供商（OpenAI 兼容 / Claude / Gemini …），免费 Google 翻译兜底
-- 📝 文字标注与评论 · 导出原文 / 纯译 / 双语 PDF
-- 🎨 现代化 UI，深浅色主题
+## Features
 
-## 使用方式
+- 📄 Multiple import methods: click / drag & drop / URL / local file; optional page range selection
+- 🌐 Auto-detect or manually pick the source language, translate into any target language
+- 🧩 Layout-preserving translation (BabelDOC): text blocks are re-overlaid in place, with side-by-side / target-only / source-only views
+- 📚 Glossary: both engines auto-extract proper nouns during translation; terms can be routed to a chosen glossary (including a default one), edited, and regenerated per region
+- 💾 Translation memory cache: identical segments aren't re-translated, saving cost and time (clearable in Settings)
+- 🔌 Configure multiple AI providers (OpenAI-compatible / Claude / Gemini …), with free Google Translate as a fallback
+- 📝 Export as source / translation-only / bilingual PDF
 
-### 方式 A：仅使用浏览器引擎（零配置）
-- 访问 GitHub Pages 上的网站
-- 使用默认的浏览器启发式引擎
-- 完全在浏览器中工作，无需安装任何东西
+## Usage
 
-### 方式 B：添加本地 BabelDOC 后端（高保真）
+### Option A: Browser engine only (zero configuration)
+- Visit the site hosted on GitHub Pages
+- Uses the default browser heuristic engine
+- Runs entirely in the browser, nothing to install
 
-用 [uv](https://docs.astral.sh/uv/) 安装，无需克隆仓库：
+### Option B: Add the local BabelDOC backend (high fidelity)
+
+Install with [uv](https://docs.astral.sh/uv/), no need to clone the repo:
 
 ```bash
-# 1. 安装 BabelDOC（隔离 Python 3.12，提供 `babeldoc` 命令）
+# 1. Install BabelDOC (isolated Python 3.12, provides the `babeldoc` command)
 uv tool install --python 3.12 BabelDOC
 
-# 2. 安装后端（提供 `pdftranslate-backend` 命令）
+# 2. Install the backend (provides the `pdftranslate-backend` command)
 uv tool install --python 3.12 "git+https://github.com/DragonLYL0718/PDFTranslate.git#subdirectory=backend"
 
-# 3. 启动后端（保持运行）
+# 3. Start the backend (keep it running)
 pdftranslate-backend
 ```
 
-然后访问 GitHub Pages 站点，在「安装 BabelDOC」对话框点「测试连接」，成功后选择「高保真（BabelDOC）」引擎即可。之后每次只需再运行 `pdftranslate-backend`。
+Then open the GitHub Pages site, click "Test Connection" in the "Install BabelDOC" dialog, and once it succeeds, select the "High Fidelity (BabelDOC)" engine. After the first setup, you only need to run `pdftranslate-backend` again.
 
-> 应用内的「安装 BabelDOC」对话框会根据你的部署地址自动填好上面的仓库 URL。
+> The in-app "Install BabelDOC" dialog auto-fills the repo URL above based on your deployment address.
 
-详见 [`backend/INSTALL.md`](backend/INSTALL.md)。
+See [`backend/INSTALL.md`](backend/INSTALL.md) for details.
 
-## 架构
+## Architecture
 
-- **引擎 A（浏览器启发式）**：PDF.js + AI LLM，部署在 GitHub Pages，无需配置。
-- **引擎 B（高保真 BabelDOC）**：本地 Python 后端（AGPL-3.0，可选），提供最佳排版保留效果。
+- **Engine A (browser heuristic)**: PDF.js + an AI LLM, deployed on GitHub Pages, no setup required.
+- **Engine B (high-fidelity BabelDOC)**: an optional local Python backend (AGPL-3.0) that gives the best layout preservation.
 
-## 开发
+## Development
 
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm run build      # 产物在 dist/
+npm run build      # output in dist/
 ```
 
-推送到 `main` 触发 GitHub Actions 构建并发布到 Pages。
+Pushing to `main` triggers a GitHub Actions build that publishes to Pages.
 
-## 许可证
+## Open Source Acknowledgements
 
-前端代码采用 MIT。可选的 `backend/` 组件基于 BabelDOC，遵循 **AGPL-3.0**，作为独立进程通过本地 HTTP API 调用。
+This project is built on top of these open source projects:
+
+| Project | Description | License |
+|---|---|---|
+| [BabelDOC](https://github.com/funstory-ai/BabelDOC) | Optional high-fidelity translation backend (Engine B) | AGPL-3.0 |
+| [pdf.js](https://github.com/mozilla/pdf.js) | PDF parsing and rendering in the browser | Apache-2.0 |
+| [pdf-lib](https://github.com/Hopding/pdf-lib) | PDF creation and export | MIT |
+| [Dexie.js](https://github.com/dexie/Dexie.js) | IndexedDB wrapper for local-first data storage | Apache-2.0 |
+| [tesseract.js](https://github.com/naptha/tesseract.js) | OCR for scanned PDFs | Apache-2.0 |
+| [franc](https://github.com/wooorm/franc) | Natural language detection | MIT |
+| [React](https://github.com/facebook/react) | UI framework | MIT |
+| [Vite](https://github.com/vitejs/vite) | Build tooling and dev server | MIT |
+| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | Styling | MIT |
+| [Zustand](https://github.com/pmndrs/zustand) | Minimal state management | MIT |
+
+## License
+
+The frontend code is MIT licensed. The optional `backend/` component wraps BabelDOC and is licensed under **AGPL-3.0**, invoked as a separate process over a local HTTP API.
