@@ -50,6 +50,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   babelDocUrl: "http://localhost:8787",
   memoryEnabled: true,
   autoExtractTerms: true,
+  termStrictness: "standard",
+  defaultGlossaryId: null,
   lastOptions: {
     sourceLang: "auto",
     targetLang: "zh",

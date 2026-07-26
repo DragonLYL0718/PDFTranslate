@@ -1,3 +1,5 @@
+import type { MessageKey } from "@/i18n/zh";
+
 // Core domain types shared across features.
 
 export type EngineId = "heuristic" | "babeldoc";
@@ -50,6 +52,11 @@ export interface DocRecord {
   error?: string;
   /** Non-fatal problem with an otherwise finished translation (e.g. dropped paragraphs). */
   warning?: string;
+  /**
+   * Glossary that receives this document's auto-extracted terms. Unset means
+   * "a per-document auto glossary", resolved lazily so the default can change.
+   */
+  glossaryId?: string | null;
   /** Original PDF bytes, kept locally. */
   data: ArrayBuffer;
   /** Translated PDF bytes from engine B (BabelDOC); undefined for engine A. */
@@ -75,6 +82,11 @@ export type ReasoningLevel = "off" | "low" | "medium" | "high";
 export interface Provider {
   id: string;
   name: string;
+  /**
+   * Set when `name` is an app-supplied default the user never chose, so it can
+   * follow the interface language. Cleared as soon as they rename it.
+   */
+  nameKey?: MessageKey;
   kind: ProviderKind;
   baseURL: string;
   apiKey: string;
@@ -107,12 +119,25 @@ export interface AppSettings {
   memoryEnabled: boolean;
   /** After translating, auto-extract proper nouns into the document's glossary. */
   autoExtractTerms: boolean;
+  /** How selective auto-extraction is about what counts as a term. */
+  termStrictness: TermStrictness;
+  /**
+   * Glossary that auto-extracted terms land in by default. null = keep them in
+   * a per-document "auto" glossary instead of a shared library.
+   */
+  defaultGlossaryId: string | null;
 }
+
+/** How selective term extraction is. "loose" keeps whatever the model proposes. */
+export type TermStrictness = "loose" | "standard" | "strict";
 
 /** A named term collection. "auto" glossaries are created per document for extracted terms. */
 export interface Glossary {
   id: string;
   name: string;
+  /** See Provider.nameKey — an app-supplied name that follows the UI language. */
+  nameKey?: MessageKey;
+  nameParams?: Record<string, string>;
   kind: "manual" | "auto";
   docId?: string;
   createdAt: number;

@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { Link } from "react-router-dom";
 import { FileText, Trash2, Loader2, CircleAlert, CheckCircle2 } from "lucide-react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { styles } from "@/lib/styles";
 import { db, deleteDocument } from "@/db/db";
@@ -13,7 +14,7 @@ export function HistoryList() {
   if (docs && docs.length === 0) {
     return (
       <div className={cn(styles.card, "p-8 text-center")}>
-        <p className={styles.muted}>还没有翻译记录。上传一个 PDF 开始吧。</p>
+        <p className={styles.muted}>{t("history.empty")}</p>
       </div>
     );
   }
@@ -38,7 +39,11 @@ function DocCard({ doc }: { doc: DocRecord }) {
         <div className="truncate font-medium">{doc.name}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-3">
           <span>{langName(doc.detectedLang ?? doc.sourceLang)} → {langName(doc.targetLang)}</span>
-          <span>{doc.pageCount} 页{doc.selectedPages ? `（选 ${doc.selectedPages.length}）` : ""}</span>
+          <span>
+            {doc.selectedPages
+              ? t("history.pagesSelected", { count: doc.pageCount, selected: doc.selectedPages.length })
+              : t("history.pages", { count: doc.pageCount })}
+          </span>
           <span>{new Date(doc.createdAt).toLocaleString()}</span>
         </div>
       </Link>
@@ -48,8 +53,8 @@ function DocCard({ doc }: { doc: DocRecord }) {
       <button
         onClick={() => deleteDocument(doc.id)}
         className="rounded-control p-2 text-text-3 transition-colors hover:bg-surface-2 hover:text-red-500"
-        aria-label="删除"
-        title="删除"
+        aria-label={t("common.delete")}
+        title={t("common.delete")}
       >
         <Trash2 className="size-4" />
       </button>
@@ -69,16 +74,16 @@ function StatusBadge({ doc }: { doc: DocRecord }) {
   if (doc.status === "translated") {
     return (
       <span className={styles.chip}>
-        <CheckCircle2 className="size-3.5 text-accent" /> 已完成
+        <CheckCircle2 className="size-3.5 text-accent" /> {t("history.done")}
       </span>
     );
   }
   if (doc.status === "error") {
     return (
       <span className={cn(styles.chip, "text-red-500")} title={doc.error}>
-        <CircleAlert className="size-3.5" /> 失败
+        <CircleAlert className="size-3.5" /> {t("history.failed")}
       </span>
     );
   }
-  return <span className={styles.chip}>待翻译</span>;
+  return <span className={styles.chip}>{t("history.pending")}</span>;
 }

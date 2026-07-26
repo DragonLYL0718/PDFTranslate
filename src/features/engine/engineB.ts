@@ -1,13 +1,35 @@
-import { db } from "@/db/db";
-import type { LangCode } from "@/types";
+import { db, readSettings } from "@/db/db";
+import { t } from "@/i18n";
+import type { LangCode, Provider } from "@/types";
 import { listProviders } from "@/features/providers/store";
 import { openaiBase } from "@/features/providers/util";
 import { formatPageRange } from "@/features/import/pageRange";
+import { parseCsv, resolveTermTarget, upsertAutoTerms } from "@/features/glossary/store";
+import { filterTermPairs, noteTermWarning } from "@/features/glossary/extract";
 
 export interface EngineBStatus {
   available: boolean;
   version?: string;
   babeldoc?: string;
+  /** Capabilities the backend advertises; absent on backends predating them. */
+  features?: string[];
+}
+
+/** A paragraph the translator gave up on — its source text survives in the PDF. */
+interface FailedParagraph {
+  id: string;
+  text: string;
+  error: string;
+}
+
+/** Per-run detail the backend parks for a single pickup after translating. */
+interface RunReport {
+  total: number;
+  ok: number;
+  fallback: number;
+  filtered: number;
+  failures: FailedParagraph[];
+  glossary_csv: string | null;
 }
 
 /**
@@ -84,21 +106,89 @@ async function resolveOpenAIProvider(preferredId: string | null) {
 }
 
 /**
- * Turn the backend's paragraph tally into a user-facing warning, or undefined
- * when everything translated cleanly. BabelDOC returns a PDF and exit code 0
- * even when the model failed on half the paragraphs — those come back blank,
- * which looks like a layout bug rather than a translation failure.
+ * Name the paragraphs the translation actually lost, or undefined when it lost
+ * none. BabelDOC returns a PDF and exit code 0 either way, so a real failure is
+ * only visible as source text left sitting in the output.
+ *
+ * Says nothing about the `fallback` tally on purpose: those paragraphs were
+ * declined by the batched stage and re-translated one at a time, so they are in
+ * the PDF and translated. Counting them as losses accused the run of dropping
+ * text the user could plainly see was present.
  */
-function describeStats(header: string | null): string | undefined {
-  if (!header) return undefined;
-  const n = (k: string) => Number(header.match(new RegExp(`${k}=(\\d+)`))?.[1] ?? 0);
-  const [total, ok] = [n("total"), n("ok")];
-  if (!total || ok === total) return undefined;
-  return (
-    `${total} 个段落中有 ${total - ok} 个未能正常翻译，译文里这些段落会缺失或保留原文。` +
-    `常见原因是模型报错或触发限流：可在设置中把该提供商的「推理强度」设为关闭，` +
-    `或启动后端前设置环境变量 BABELDOC_QPS=1 降低并发，然后重新翻译。`
-  );
+function describeFailures(report: RunReport): string | undefined {
+  const lost = report.failures.length + report.filtered;
+  if (!lost) return undefined;
+  const samples = report.failures
+    .slice(0, 3)
+    .map((f) => `· ${f.text.slice(0, 60)}${f.text.length > 60 ? "…" : ""} —— ${f.error}`);
+  return [
+    t("engineB.lostHeader", { total: report.total, lost }),
+    ...samples,
+    report.failures.length > 3 ? t("engineB.lostMore", { count: report.failures.length - 3 }) : "",
+    report.filtered ? t("engineB.filtered", { count: report.filtered }) : "",
+    t("engineB.lostAdvice"),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Collect the run report the backend parked for us. Null if it never arrived. */
+async function fetchReport(reportId: string | null): Promise<RunReport | null> {
+  if (!reportId) return null;
+  try {
+    const res = await fetch(`${_configUrl.replace(/\/$/, "")}/api/report/${reportId}`);
+    return res.ok ? ((await res.json()) as RunReport) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * File the glossary BabelDOC extracted during this run under the document's
+ * glossary. BabelDOC extracts terms anyway to keep terminology consistent;
+ * `--save-auto-extracted-glossary` is only what writes them out.
+ */
+async function importBabelDocGlossary(
+  docId: string,
+  docName: string,
+  report: RunReport | null,
+  provider: Provider,
+): Promise<void> {
+  try {
+    if (!report) {
+      throw new Error(
+        getEngineBStatus().features?.includes("report")
+          ? t("engineB.noReport")
+          : t("engineB.backendOld"),
+      );
+    }
+    // BabelDOC only writes the CSV when it actually found terms. The BOM it
+    // writes would otherwise hide the header row from the parser, which then
+    // imports "source,target" as a term.
+    const pairs = parseCsv((report.glossary_csv ?? "").replace(/^﻿/, ""))
+      .filter((p) => p.target)
+      .map((p) => ({ source: p.source, target: p.target }));
+    if (!pairs.length) {
+      await noteTermWarning(docId, t("engineB.noTerms"));
+      return;
+    }
+    // BabelDOC's extraction prompt is fixed and errs generous, so the user's
+    // strictness setting has to be applied here rather than at extraction time.
+    const strictness = (await readSettings()).termStrictness;
+    const kept = await filterTermPairs(provider, pairs, strictness);
+    await upsertAutoTerms(await resolveTermTarget(docId, docName), kept);
+  } catch (e) {
+    await noteTermWarning(docId, t("warn.termsFailed", { error: e instanceof Error ? e.message : String(e) }));
+  }
+}
+
+export interface EngineBOptions {
+  source: LangCode;
+  target: LangCode;
+  providerId: string | null;
+  /** Keep BabelDOC's own term extraction on and file the result in a glossary. */
+  autoExtract: boolean;
+  signal?: AbortSignal;
 }
 
 /**
@@ -106,21 +196,16 @@ function describeStats(header: string | null): string | undefined {
  * PDF plus the OpenAI-compatible provider config, then stores the returned
  * translated PDF bytes on the document for the reader to render.
  */
-export async function translateWithEngineB(
-  docId: string,
-  source: LangCode,
-  target: LangCode,
-  providerId: string | null,
-  signal?: AbortSignal,
-): Promise<void> {
+export async function translateWithEngineB(docId: string, opts: EngineBOptions): Promise<void> {
+  const { source, target, providerId, signal } = opts;
   const doc = await db.documents.get(docId);
-  if (!doc) throw new Error("文档不存在");
+  if (!doc) throw new Error(t("error.docNotFound"));
 
   const provider = await resolveOpenAIProvider(providerId);
   if (!provider) {
     await db.documents.update(docId, {
       status: "error",
-      error: "未找到可用的 OpenAI 兼容提供商，请先在设置中添加一个（含 API Key）。",
+      error: t("engineB.noOpenAI"),
     });
     throw new Error("no openai-compatible provider");
   }
@@ -141,6 +226,7 @@ export async function translateWithEngineB(
     // translates the whole document regardless of what the user picked.
     if (doc.selectedPages?.length) form.append("pages", formatPageRange(doc.selectedPages));
     form.append("thinking", (provider.reasoning ?? "off") === "off" ? "disabled" : "enabled");
+    form.append("auto_glossary", opts.autoExtract ? "on" : "off");
     form.append("openai_base_url", openaiBase(provider.baseURL));
     form.append("openai_api_key", provider.apiKey);
     form.append("openai_model", provider.model);
@@ -153,18 +239,23 @@ export async function translateWithEngineB(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error ?? `后端错误 ${res.status}`);
+      throw new Error(err.error ?? t("engineB.backendError", { status: res.status }));
     }
 
-    const warning = describeStats(res.headers.get("X-Translate-Stats"));
+    const reportId = res.headers.get("X-Report-Id");
     const translatedData = await res.arrayBuffer();
+    const report = await fetchReport(reportId);
     await db.documents.update(docId, {
       translatedData,
       status: "translated",
       progress: 1,
       updatedAt: Date.now(),
-      warning,
+      warning: report ? describeFailures(report) : undefined,
     });
+
+    // BabelDOC extracts terms as part of translating; file them afterwards so
+    // a hiccup here can't discard an otherwise finished PDF.
+    if (opts.autoExtract) await importBabelDocGlossary(docId, doc.name, report, provider);
   } catch (e) {
     await db.documents.update(docId, {
       status: "error",

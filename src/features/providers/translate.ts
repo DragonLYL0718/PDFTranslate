@@ -1,5 +1,6 @@
+import { t } from "@/i18n";
 import type { LangCode, Provider } from "@/types";
-import { langName } from "@/features/import/languages";
+import { langPromptName } from "@/features/import/languages";
 import { openaiBase, reasoningBudget, reasoningEnabled } from "./util";
 import { smartFetch, withTimeout } from "./net";
 
@@ -35,9 +36,8 @@ export async function translateSegments(
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(source: LangCode, target: LangCode, glossary?: GlossaryEntry[]): string {
-  const src = source === "auto" ? "the source language (auto-detect)" : langName(source);
   const lines = [
-    `You are a professional document translator. Translate each segment from ${src} into ${langName(target)}.`,
+    `You are a professional document translator. Translate each segment from ${langPromptName(source)} into ${langPromptName(target)}.`,
     "Rules:",
     "- Preserve meaning, tone, numbers, punctuation and inline formatting.",
     "- Do NOT translate code, URLs, math formulas or proper nouns that have no standard translation.",
@@ -185,7 +185,7 @@ function parseTranslations(raw: string, count: number): string[] {
     // pad/truncate defensively
     return Array.from({ length: count }, (_, i) => out[i] ?? "");
   }
-  throw new Error("无法解析翻译结果（模型未返回有效 JSON）");
+  throw new Error(t("error.parseTranslation"));
 }
 
 // ---------------------------------------------------------------------------

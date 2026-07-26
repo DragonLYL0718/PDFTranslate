@@ -1,10 +1,12 @@
 import { db } from "@/db/db";
+import { t, tDynamic } from "@/i18n";
 import type { Provider } from "@/types";
-import type { ProviderPreset } from "./presets";
+import { presetName, type ProviderPreset } from "./presets";
 
 export const GOOGLE_FREE: Provider = {
   id: "__google_free__",
-  name: "Google 翻译（免费兜底）",
+  // Synthesised, never persisted — display goes through providerLabel().
+  name: "Google Translate",
   kind: "google-free",
   baseURL: "",
   apiKey: "",
@@ -13,11 +15,22 @@ export const GOOGLE_FREE: Provider = {
   order: 9999,
 };
 
+/**
+ * Display name. App-supplied defaults ("Custom (OpenAI-compatible)", "Untitled
+ * provider") are stored as a key so they follow the UI language; a name the
+ * user typed is returned verbatim.
+ */
+export function providerLabel(p: Provider): string {
+  if (p.kind === "google-free") return t("provider.googleFree");
+  return (p.nameKey && tDynamic(p.nameKey)) || p.name;
+}
+
 /** Build an unsaved Provider from a preset (used to seed the add form). */
 export function makeProvider(preset: ProviderPreset, order: number): Provider {
   return {
     id: crypto.randomUUID(),
-    name: preset.name,
+    name: presetName(preset),
+    nameKey: preset.nameKey,
     kind: preset.kind,
     baseURL: preset.baseURL,
     apiKey: "",

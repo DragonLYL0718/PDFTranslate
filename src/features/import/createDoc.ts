@@ -28,6 +28,8 @@ export interface CreateDocInput {
   detectedLang?: LangCode;
   targetLang: LangCode;
   engine: EngineId;
+  /** Glossary for extracted terms; null = per-document, undefined = app default. */
+  glossaryId?: string | null;
 }
 
 export async function createDoc(input: CreateDocInput): Promise<string> {
@@ -45,6 +47,7 @@ export async function createDoc(input: CreateDocInput): Promise<string> {
     detectedLang: input.detectedLang,
     targetLang: input.targetLang,
     engine: input.engine,
+    glossaryId: input.glossaryId,
     status: "ready",
     progress: 0,
     data: input.data,

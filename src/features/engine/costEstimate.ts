@@ -1,3 +1,5 @@
+import { t } from "@/i18n";
+import { providerLabel } from "@/features/providers/store";
 import type { Provider } from "@/types";
 
 /** Rough cost-per-million tokens for common models (approximate, in USD). */
@@ -63,7 +65,7 @@ export function estimateCost(
     providers: providers.map((p) => {
       const rate = rateFor(p.model);
       if (rate.input === 0 && rate.output === 0) {
-        return { name: p.name, model: p.model, costMin: "免费", costMax: "免费", free: true };
+        return { name: providerLabel(p), model: p.model, costMin: t("common.free"), costMax: t("common.free"), free: true };
       }
       const min = (estimateInputTokens * rate.input + estimateOutputTokens * rate.output) / 1_000_000;
       const max = (estimateInputTokens * rate.input * 1.5 + estimateOutputTokens * rate.output * 1.5) / 1_000_000;

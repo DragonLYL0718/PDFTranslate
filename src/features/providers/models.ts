@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { Provider } from "@/types";
 import { openaiBase } from "./util";
 import { smartFetch } from "./net";
@@ -18,7 +19,7 @@ export async function fetchModels(provider: Provider): Promise<string[]> {
         "anthropic-dangerous-direct-browser-access": "true",
       },
     });
-    if (!res.ok) throw new Error(`拉取失败 ${res.status}`);
+    if (!res.ok) throw new Error(t("provider.fetchFailedStatus", { status: res.status }));
     const json = await res.json();
     return (json.data ?? []).map((m: { id: string }) => m.id);
   }
@@ -28,7 +29,7 @@ export async function fetchModels(provider: Provider): Promise<string[]> {
     const res = await smartFetch(`${base}/v1beta/models?pageSize=1000`, {
       headers: { "x-goog-api-key": provider.apiKey },
     });
-    if (!res.ok) throw new Error(`拉取失败 ${res.status}`);
+    if (!res.ok) throw new Error(t("provider.fetchFailedStatus", { status: res.status }));
     const json = await res.json();
     return (json.models ?? [])
       .map((m: { name: string }) => m.name.replace(/^models\//, ""))
@@ -41,7 +42,7 @@ export async function fetchModels(provider: Provider): Promise<string[]> {
   const res = await smartFetch(`${openaiBase(provider.baseURL)}/models`, {
     headers: { authorization: `Bearer ${provider.apiKey}` },
   });
-  if (!res.ok) throw new Error(`拉取失败 ${res.status}`);
+  if (!res.ok) throw new Error(t("provider.fetchFailedStatus", { status: res.status }));
   const json = await res.json();
   return (json.data ?? [])
     .map((m: { id: string }) => m.id)

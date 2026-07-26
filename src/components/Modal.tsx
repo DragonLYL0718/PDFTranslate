@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { styles } from "@/lib/styles";
 
@@ -32,7 +33,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
         {title && (
           <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">
             <h2 className="font-semibold tracking-tight">{title}</h2>
-            <button onClick={onClose} className="rounded-control p-1 text-text-3 hover:bg-surface-2" aria-label="关闭">
+            <button onClick={onClose} className="rounded-control p-1 text-text-3 hover:bg-surface-2" aria-label={t("common.close")}>
               <X className="size-4" />
             </button>
           </div>

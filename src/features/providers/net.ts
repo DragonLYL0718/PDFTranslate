@@ -7,6 +7,8 @@ let proxy = { enabled: false, url: "http://localhost:8788" };
 // The BabelDOC backend doubles as a CORS relay; always a fallback candidate.
 let backendUrl = "http://localhost:8787";
 
+import { t } from "@/i18n";
+
 // Provider origins we've learned require relaying (a direct call failed with a
 // network/CORS error). Skips the doomed direct attempt on subsequent batches.
 const relayHosts = new Set<string>();
@@ -14,7 +16,7 @@ const relayHosts = new Set<string>();
 /** Thrown when a request needs a local relay but none is reachable. */
 export class ProxyUnavailableError extends Error {
   constructor(public target: string) {
-    super("需要本地服务转发，但未检测到正在运行的服务");
+    super(t("error.proxyUnavailable"));
     this.name = "ProxyUnavailableError";
   }
 }

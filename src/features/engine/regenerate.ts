@@ -1,4 +1,5 @@
 import { db } from "@/db/db";
+import { t } from "@/i18n";
 import type { LangCode } from "@/types";
 import { buildChain } from "@/features/providers/store";
 import { getInjectionTerms } from "@/features/glossary/store";
@@ -19,7 +20,7 @@ export async function regenerateBlocks(
   if (!doc) return 0;
 
   const chain = await buildChain(opts.providerId, opts.googleFallback);
-  if (!chain.length) throw new Error("没有可用的翻译提供商");
+  if (!chain.length) throw new Error(t("error.noTranslationProvider"));
 
   const source: LangCode = doc.sourceLang === "auto" ? doc.detectedLang ?? "auto" : doc.sourceLang;
   const runOpts: RunOptions = {

@@ -1,13 +1,25 @@
+import { t, type PlainKey } from "@/i18n";
 import type { ProviderKind } from "@/types";
 
 export interface ProviderPreset {
   key: string;
+  /** Vendor name, shown as-is. Presets that aren't a brand carry `nameKey` instead. */
   name: string;
+  /** Set when the label is descriptive rather than a brand, e.g. "Custom (OpenAI-compatible)". */
+  nameKey?: PlainKey;
   kind: ProviderKind;
   baseURL: string;
   model: string;
   /** Where to get an API key (shown as a hint). */
   keyHint?: string;
+}
+
+/**
+ * Resolve a preset's display name. Not baked into the array: this module is
+ * evaluated at import time, before initI18n() has picked the locale.
+ */
+export function presetName(preset: ProviderPreset): string {
+  return preset.nameKey ? t(preset.nameKey) : preset.name;
 }
 
 // cc-switch-style presets. Users pick one, fill in their key, and can edit any field.
@@ -23,6 +35,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { key: "groq", name: "Groq", kind: "openai", baseURL: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
   { key: "mistral", name: "Mistral", kind: "openai", baseURL: "https://api.mistral.ai/v1", model: "mistral-small-latest" },
   { key: "xai", name: "xAI Grok", kind: "openai", baseURL: "https://api.x.ai/v1", model: "grok-2-latest" },
-  { key: "ollama", name: "Ollama（本地）", kind: "openai", baseURL: "http://localhost:11434/v1", model: "qwen2.5" },
-  { key: "custom", name: "自定义（OpenAI 兼容）", kind: "openai", baseURL: "https://", model: "" },
+  { key: "ollama", name: "Ollama", nameKey: "preset.local", kind: "openai", baseURL: "http://localhost:11434/v1", model: "qwen2.5" },
+  { key: "custom", name: "Custom", nameKey: "preset.custom", kind: "openai", baseURL: "https://", model: "" },
 ];

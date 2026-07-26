@@ -1,34 +1,44 @@
 import { franc } from "franc-min";
+import { t, type PlainKey } from "@/i18n";
 import type { LangCode } from "@/types";
 
-// UI language list (ISO 639-1 + Chinese label).
-export const LANGUAGES: { code: LangCode; name: string }[] = [
-  { code: "zh", name: "中文" },
-  { code: "en", name: "英语" },
-  { code: "ja", name: "日语" },
-  { code: "ko", name: "韩语" },
-  { code: "fr", name: "法语" },
-  { code: "de", name: "德语" },
-  { code: "es", name: "西班牙语" },
-  { code: "it", name: "意大利语" },
-  { code: "pt", name: "葡萄牙语" },
-  { code: "ru", name: "俄语" },
-  { code: "ar", name: "阿拉伯语" },
-  { code: "hi", name: "印地语" },
-  { code: "th", name: "泰语" },
-  { code: "vi", name: "越南语" },
-  { code: "id", name: "印尼语" },
-  { code: "nl", name: "荷兰语" },
-  { code: "pl", name: "波兰语" },
-  { code: "tr", name: "土耳其语" },
-  { code: "uk", name: "乌克兰语" },
+// Supported document languages. `en` is the canonical name handed to the model;
+// the name shown in the UI comes from the catalog (`lang.<code>`) instead, so
+// the interface language can't leak into a prompt.
+export const LANGUAGES: { code: LangCode; en: string }[] = [
+  { code: "zh", en: "Chinese" },
+  { code: "en", en: "English" },
+  { code: "ja", en: "Japanese" },
+  { code: "ko", en: "Korean" },
+  { code: "fr", en: "French" },
+  { code: "de", en: "German" },
+  { code: "es", en: "Spanish" },
+  { code: "it", en: "Italian" },
+  { code: "pt", en: "Portuguese" },
+  { code: "ru", en: "Russian" },
+  { code: "ar", en: "Arabic" },
+  { code: "hi", en: "Hindi" },
+  { code: "th", en: "Thai" },
+  { code: "vi", en: "Vietnamese" },
+  { code: "id", en: "Indonesian" },
+  { code: "nl", en: "Dutch" },
+  { code: "pl", en: "Polish" },
+  { code: "tr", en: "Turkish" },
+  { code: "uk", en: "Ukrainian" },
 ];
 
-const NAME_BY_CODE = new Map(LANGUAGES.map((l) => [l.code, l.name]));
+const EN_BY_CODE = new Map(LANGUAGES.map((l) => [l.code, l.en]));
 
+/** For LLM prompts — always English, never localized. */
+export function langPromptName(code: LangCode): string {
+  if (code === "auto") return "the source language (auto-detect)";
+  return EN_BY_CODE.get(code) ?? code;
+}
+
+/** For display — follows the interface language. */
 export function langName(code: LangCode): string {
-  if (code === "auto") return "自动识别";
-  return NAME_BY_CODE.get(code) ?? code;
+  if (code !== "auto" && !EN_BY_CODE.has(code)) return code;
+  return t(`lang.${code}` as PlainKey);
 }
 
 // franc returns ISO 639-3; map the ones we support back to 639-1.

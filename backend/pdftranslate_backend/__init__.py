@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from pathlib import Path
 from uuid import uuid4
 
@@ -63,8 +64,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     # Without this the browser can't read our custom response header.
-    expose_headers=["X-Translate-Stats"],
+    expose_headers=["X-Report-Id"],
 )
+
+# Per-run reports (extracted glossary + failed paragraphs), handed out once by
+# /api/report/{id}. The translate response body is the PDF and this payload is
+# both too big and too non-ASCII for a header, so it waits here instead.
+# Bounded so a long-lived backend can't grow without limit.
+_REPORTS: OrderedDict[str, dict] = OrderedDict()
+_REPORT_LIMIT = 32
 
 
 def _origin_allowed(origin: str | None) -> bool:
@@ -79,6 +87,9 @@ async def health():
         "name": "pdftranslate-backend",
         "version": VERSION,
         "babeldoc": _babeldoc_version(),
+        # Lets the app tell "this backend predates per-run reports, restart it"
+        # apart from "this run genuinely produced no terms".
+        "features": ["report"],
     }
 
 
@@ -93,26 +104,56 @@ def _babeldoc_version() -> str | None:
         return None
 
 
-def _translation_stats(log: str) -> str | None:
-    """
-    Summarise how the translation actually went, as "total=N,ok=N,fallback=N,error=N".
+# A paragraph the per-paragraph translator gave up on. This is the *last*
+# attempt, so unlike the batch stage's own errors it really does mean the
+# paragraph keeps its source text. BabelDOC logs the id and the original text.
+_FAILED_PARAGRAPH_RE = re.compile(
+    r"Error translating paragraph\. Paragraph: (\S+) \((.*?)\)\. Error: (.*?)(?=Traceback|Error translating|$)"
+)
+_TALLY_RE = re.compile(
+    r"Translation completed\. Total: (\d+), Successful: (\d+), Fallback: (\d+)"
+)
 
-    BabelDOC never fails the run over a bad paragraph: a raised LLM call is
-    logged and the paragraph skipped, and an empty model response is written
-    out as-is. Either way it exits 0 and returns a PDF with text missing, which
-    reads to the user as broken layout. Its own end-of-run tally tells the real
-    story, so we forward it instead of reporting unqualified success.
+
+def _translation_report(log: str) -> dict:
+    """
+    Work out what actually went wrong, from BabelDOC's log.
+
+    BabelDOC's own end-of-run tally counts "Fallback" paragraphs, but a fallback
+    is NOT a failure: the batched LLM stage declines the paragraph (bad JSON,
+    placeholder mismatch, edit distance too small, …) and resubmits it to the
+    slower per-paragraph translator, which normally succeeds. Reporting
+    `total - ok` as broken therefore accused the translation of losing text that
+    is right there in the PDF.
+
+    A paragraph is only really lost when that second attempt also raises, which
+    BabelDOC logs with the paragraph id and its source text.
 
     `rich` hard-wraps log lines, so match against whitespace-collapsed text.
     """
     flat = re.sub(r"\s+", " ", log)
-    m = re.search(
-        r"Translation completed\. Total: (\d+), Successful: (\d+), Fallback: (\d+)", flat
-    )
-    if not m:
-        return None
-    errors = flat.count("Error translating paragraph")
-    return f"total={m[1]},ok={m[2]},fallback={m[3]},error={errors}"
+    tally = _TALLY_RE.search(flat)
+
+    failures: list[dict] = []
+    seen: set[str] = set()
+    for m in _FAILED_PARAGRAPH_RE.finditer(flat):
+        pid = m[1]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        failures.append(
+            {"id": pid, "text": m[2].strip()[:120], "error": m[3].strip()[:200]}
+        )
+
+    return {
+        "total": int(tally[1]) if tally else 0,
+        "ok": int(tally[2]) if tally else 0,
+        "fallback": int(tally[3]) if tally else 0,
+        # Paragraphs blocked by the provider's content filter keep their source
+        # text too, but are logged without an id.
+        "filtered": flat.count("ContentFilterError:"),
+        "failures": failures,
+    }
 
 
 # -- translate endpoint ---------------------------------------------------
@@ -127,6 +168,9 @@ async def translate(
     # such a model can spend its whole output budget thinking and return an
     # empty translation, which BabelDOC counts as a failure and drops.
     thinking: str = Form(""),
+    # "off" turns off BabelDOC's own term extraction (it is on by default, and
+    # costs extra model calls). Anything else keeps it on and saves the result.
+    auto_glossary: str = Form(""),
     # OpenAI-compatible LLM config — BabelDOC needs a translator to run.
     openai_base_url: str = Form(""),
     openai_api_key: str = Form(""),
@@ -181,6 +225,13 @@ async def translate(
             cmd.extend(["--pages", pages.strip()])
         if thinking in ("enabled", "disabled"):
             cmd.extend(["--openai-thinking", thinking])
+        # BabelDOC extracts a glossary during translation to keep terminology
+        # consistent; --save-auto-extracted-glossary is what writes it out so we
+        # can hand it back to the app.
+        if auto_glossary == "off":
+            cmd.append("--no-auto-extract-glossary")
+        else:
+            cmd.append("--save-auto-extracted-glossary")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -214,11 +265,12 @@ async def translate(
 
         out_bytes = out_file.read_bytes()
 
-        headers = {"Content-Disposition": "attachment; filename=translated.pdf"}
-        stats = _translation_stats(log)
-        if stats:
-            headers["X-Translate-Stats"] = stats
-
+        report = _translation_report(log)
+        report["glossary_csv"] = _read_glossary(out_dir)
+        headers = {
+            "Content-Disposition": "attachment; filename=translated.pdf",
+            "X-Report-Id": _stash_report(report),
+        }
         return Response(content=out_bytes, media_type="application/pdf", headers=headers)
 
     except asyncio.TimeoutError:
@@ -228,6 +280,39 @@ async def translate(
     finally:
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _read_glossary(out_dir: Path) -> str | None:
+    """
+    Read the auto-extracted glossary CSV. BabelDOC writes it next to the PDFs as
+    `<name>.<lang>.glossary.csv` (utf-8-sig); the temp directory is wiped when
+    this request returns, so pull it out now.
+    """
+    files = sorted(out_dir.glob("*.glossary.csv"))
+    if not files:
+        return None
+    try:
+        csv_text = files[0].read_text(encoding="utf-8-sig")
+    except Exception:
+        return None
+    return csv_text if csv_text.strip() else None
+
+
+def _stash_report(report: dict) -> str:
+    rid = uuid4().hex
+    _REPORTS[rid] = report
+    while len(_REPORTS) > _REPORT_LIMIT:
+        _REPORTS.popitem(last=False)
+    return rid
+
+
+@app.get("/api/report/{rid}")
+async def get_report(rid: str):
+    """Hand over a run's report once, then forget it."""
+    report = _REPORTS.pop(rid, None)
+    if report is None:
+        return JSONResponse(status_code=404, content={"error": "report not found"})
+    return report
 
 
 # -- CORS relay -----------------------------------------------------------

@@ -17,6 +17,7 @@ import {
   RefreshCw,
   StickyNote,
 } from "lucide-react";
+import { t, type PlainKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { styles } from "@/lib/styles";
 import { db } from "@/db/db";
@@ -33,11 +34,17 @@ import type { ExportMode } from "@/features/export/exportPdf";
 
 type ViewMode = "split" | "source" | "target";
 
-const EXPORT_OPTIONS: { mode: ExportMode; label: string; suffix: string }[] = [
-  { mode: "original", label: "原文", suffix: "原文" },
-  { mode: "translated", label: "译文", suffix: "译文" },
-  { mode: "bilingual", label: "原文+译文", suffix: "双语" },
+// `suffixKey` ends up in the download filename, not just the menu label.
+const EXPORT_OPTIONS: { mode: ExportMode; labelKey: PlainKey; suffixKey: PlainKey }[] = [
+  { mode: "original", labelKey: "reader.exportOriginal", suffixKey: "reader.suffixOriginal" },
+  { mode: "translated", labelKey: "reader.exportTranslated", suffixKey: "reader.suffixTranslated" },
+  { mode: "bilingual", labelKey: "reader.exportBilingual", suffixKey: "reader.suffixBilingual" },
 ];
+
+/** Strip anything a filesystem would choke on — a locale can return any text. */
+function safeSuffix(key: PlainKey): string {
+  return t(key).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim() || "export";
+}
 
 export function ReaderPage() {
   const { id = "" } = useParams();
@@ -85,7 +92,7 @@ export function ReaderPage() {
     let cancelled = false;
     loadDocument(doc.translatedData.slice(0))
       .then((p) => !cancelled && setTransPdf(p))
-      .catch((e) => !cancelled && console.error("加载译文 PDF 失败", e));
+      .catch((e) => !cancelled && console.error(t("reader.pdfLoadLogFailed"), e));
     return () => { cancelled = true; };
   }, [doc?.id, doc?.translatedData]);
 
@@ -136,8 +143,12 @@ export function ReaderPage() {
   function retranslate() {
     if (!doc) return;
     if (doc.engine === "babeldoc") {
-      translateWithEngineB(id, doc.sourceLang, doc.targetLang, settings.lastOptions.providerId)
-        .catch(() => {});
+      translateWithEngineB(id, {
+        source: doc.sourceLang,
+        target: doc.targetLang,
+        providerId: settings.lastOptions.providerId,
+        autoExtract: settings.autoExtractTerms,
+      }).catch(() => {});
       return;
     }
     runTranslationJob(id, {
@@ -152,25 +163,25 @@ export function ReaderPage() {
     }).catch(() => {});
   }
 
-  async function doExport(exportMode: ExportMode, suffix: string) {
+  async function doExport(exportMode: ExportMode, suffixKey: PlainKey) {
     if (!doc) return;
     setExportMenuOpen(false);
     setExporting(true);
     try {
       const { exportTranslatedPdf } = await import("@/features/export/exportPdf");
       const bytes = await exportTranslatedPdf(id, { mode: exportMode });
-      downloadBlob(bytes, `${doc.name.replace(/\.pdf$/i, "")}_${suffix}.pdf`);
+      downloadBlob(bytes, `${doc.name.replace(/\.pdf$/i, "")}_${safeSuffix(suffixKey)}.pdf`);
     } catch (e) {
-      alert(`导出失败：${e instanceof Error ? e.message : String(e)}`);
+      alert(t("reader.exportFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setExporting(false);
     }
   }
 
   if (doc === undefined) {
-    return <Centered><Loader2 className="size-5 animate-spin" /> 加载中…</Centered>;
+    return <Centered><Loader2 className="size-5 animate-spin" /> {t("reader.loading")}</Centered>;
   }
-  if (doc === null) return <Centered>文档不存在。<Link to="/" className="text-accent">返回</Link></Centered>;
+  if (doc === null) return <Centered>{t("reader.notFound")}<Link to="/" className="text-accent">{t("reader.back")}</Link></Centered>;
 
   return (
     <div
@@ -188,7 +199,7 @@ export function ReaderPage() {
         )}
       >
         <Link to="/" className={cn(styles.buttonGhost, styles.press, "px-3 py-1.5")}>
-          <ArrowLeft className="size-4" /> <span className="hidden sm:inline">返回</span>
+          <ArrowLeft className="size-4" /> <span className="hidden sm:inline">{t("reader.back")}</span>
         </Link>
         <span className="mx-1 min-w-0 flex-1 truncate text-sm font-medium">{doc.name}</span>
 
@@ -203,48 +214,52 @@ export function ReaderPage() {
             onClick={retranslate}
           >
             <RefreshCw className="size-4" />
-            {doc.status === "error" ? "重试" : doc.status === "translated" ? "重新翻译" : "翻译"}
+            {doc.status === "error"
+              ? t("reader.retry")
+              : doc.status === "translated"
+                ? t("reader.retranslate")
+                : t("reader.translate")}
           </button>
         )}
 
         <button
           onClick={() => setShowTerms((v) => !v)}
           className={cn(styles.buttonGhost, styles.press, "px-2 py-1.5", showTerms && "border-accent text-accent")}
-          title="术语"
+          title={t("reader.terms")}
         >
           <BookMarked className="size-4" />
         </button>
         <button
           onClick={() => setShowAnnot((v) => !v)}
           className={cn(styles.buttonGhost, styles.press, "px-2 py-1.5", showAnnot && "border-accent text-accent")}
-          title="标注"
+          title={t("reader.annotations")}
         >
           <StickyNote className="size-4" />
         </button>
 
         <div className="flex overflow-hidden rounded-control border border-border-subtle">
-          <ModeBtn active={mode === "source"} onClick={() => setMode("source")} icon={<FileText className="size-4" />} label="原文" />
-          <ModeBtn active={mode === "split"} onClick={() => setMode("split")} icon={<Columns2 className="size-4" />} label="对照" />
-          <ModeBtn active={mode === "target"} onClick={() => setMode("target")} icon={<Languages className="size-4" />} label="译文" />
+          <ModeBtn active={mode === "source"} onClick={() => setMode("source")} icon={<FileText className="size-4" />} label={t("reader.viewSource")} />
+          <ModeBtn active={mode === "split"} onClick={() => setMode("split")} icon={<Columns2 className="size-4" />} label={t("reader.viewSplit")} />
+          <ModeBtn active={mode === "target"} onClick={() => setMode("target")} icon={<Languages className="size-4" />} label={t("reader.viewTarget")} />
         </div>
 
         <div className="flex items-center rounded-control border border-border-subtle">
-          <button className="px-2 py-1.5 hover:bg-surface-2" onClick={() => setScale((s) => Math.max(0.5, s - 0.1))} aria-label="缩小">
+          <button className="px-2 py-1.5 hover:bg-surface-2" onClick={() => setScale((s) => Math.max(0.5, s - 0.1))} aria-label={t("reader.zoomOut")}>
             <Minus className="size-4" />
           </button>
           <span className="w-10 text-center font-mono text-xs text-text-3">{Math.round(scale * 100)}%</span>
-          <button className="px-2 py-1.5 hover:bg-surface-2" onClick={() => setScale((s) => Math.min(3, s + 0.1))} aria-label="放大">
+          <button className="px-2 py-1.5 hover:bg-surface-2" onClick={() => setScale((s) => Math.min(3, s + 0.1))} aria-label={t("reader.zoomIn")}>
             <Plus className="size-4" />
           </button>
         </div>
 
         {!fullscreen && (
-          <button className={cn(styles.buttonGhost, styles.press, "px-2 py-1.5")} onClick={() => setFullscreen(true)} title="全屏 (F)">
+          <button className={cn(styles.buttonGhost, styles.press, "px-2 py-1.5")} onClick={() => setFullscreen(true)} title={t("reader.fullscreen")}>
             <Maximize2 className="size-4" />
           </button>
         )}
         {fullscreen && (
-          <button className={cn(styles.buttonGhost, styles.press, "px-2 py-1.5")} onClick={() => setFullscreen(false)} title="退出全屏 (Esc/F)">
+          <button className={cn(styles.buttonGhost, styles.press, "px-2 py-1.5")} onClick={() => setFullscreen(false)} title={t("reader.exitFullscreen")}>
             <Minimize2 className="size-4" />
           </button>
         )}
@@ -255,7 +270,7 @@ export function ReaderPage() {
             disabled={exporting}
           >
             {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-            <span className="hidden sm:inline">导出</span>
+            <span className="hidden sm:inline">{t("reader.export")}</span>
           </button>
           {exportMenuOpen && (
             <div className={cn(styles.card, "absolute right-0 top-full z-20 mt-1 min-w-32 overflow-hidden p-1")}>
@@ -263,9 +278,9 @@ export function ReaderPage() {
                 <button
                   key={opt.mode}
                   className="w-full whitespace-nowrap rounded-control px-3 py-1.5 text-left text-sm hover:bg-surface-2"
-                  onClick={() => doExport(opt.mode, opt.suffix)}
+                  onClick={() => doExport(opt.mode, opt.suffixKey)}
                 >
-                  {opt.label}
+                  {t(opt.labelKey)}
                 </button>
               ))}
             </div>
@@ -275,12 +290,12 @@ export function ReaderPage() {
 
       {doc.status === "error" && (
         <div className="flex flex-wrap items-center gap-3 border-b border-border-subtle bg-red-500/10 px-4 py-2 text-sm text-red-500">
-          <span>翻译失败：{doc.error}</span>
+          <span>{t("reader.translateFailed", { error: doc.error ?? "" })}</span>
         </div>
       )}
       {doc.status !== "error" && doc.warning && (
         <div className="flex flex-wrap items-center gap-3 border-b border-border-subtle bg-amber-500/10 px-4 py-2 text-sm text-amber-600">
-          <span>{doc.warning}</span>
+          <span className="whitespace-pre-line">{doc.warning}</span>
         </div>
       )}
 
@@ -288,7 +303,7 @@ export function ReaderPage() {
         <main className="flex-1 overflow-auto p-4 pretty-scrollbar">
           {loadError ? (
             <Centered>
-              <span className="text-red-500">PDF 加载失败：{loadError}</span>
+              <span className="text-red-500">{t("reader.pdfLoadFailed", { error: loadError })}</span>
               <button
                 className={cn(styles.buttonGhost, styles.press, "px-3 py-1.5")}
                 onClick={() => {
@@ -298,11 +313,11 @@ export function ReaderPage() {
                     .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)));
                 }}
               >
-                <RefreshCw className="size-4" /> 重试
+                <RefreshCw className="size-4" /> {t("reader.retry")}
               </button>
             </Centered>
           ) : !pdf ? (
-            <Centered><Loader2 className="size-5 animate-spin" /> 渲染中…</Centered>
+            <Centered><Loader2 className="size-5 animate-spin" /> {t("reader.rendering")}</Centered>
           ) : (
             <div className="flex flex-col items-center gap-6">
               {Array.from({ length: doc.pageCount }, (_, i) => i + 1).map((n) => (
@@ -314,7 +329,11 @@ export function ReaderPage() {
                         <PageView pdf={transPdf} pageNumber={n} scale={scale} translated={false} />
                       ) : (
                         <div className="grid min-h-40 w-64 place-items-center rounded-card border border-border-subtle text-sm text-text-3">
-                          {doc.status === "translating" ? "翻译中…" : doc.status === "error" ? "翻译失败" : "等待译文"}
+                          {doc.status === "translating"
+                            ? t("reader.translating")
+                            : doc.status === "error"
+                              ? t("reader.translateError")
+                              : t("reader.awaitingTranslation")}
                         </div>
                       )
                     ) : (

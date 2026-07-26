@@ -1,13 +1,14 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { FileText, Library, BookMarked, Settings, Moon, Sun } from "lucide-react";
+import { t, type PlainKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { styles } from "@/lib/styles";
 import { toggleTheme, useTheme } from "./theme";
 
-const nav = [
-  { to: "/", label: "文档库", icon: Library, end: true },
-  { to: "/glossary", label: "术语库", icon: BookMarked, end: false },
-  { to: "/settings", label: "设置", icon: Settings, end: false },
+const nav: { to: string; labelKey: PlainKey; icon: typeof Library; end: boolean }[] = [
+  { to: "/", labelKey: "nav.library", icon: Library, end: true },
+  { to: "/glossary", labelKey: "nav.glossary", icon: BookMarked, end: false },
+  { to: "/settings", labelKey: "nav.settings", icon: Settings, end: false },
 ];
 
 export function Layout() {
@@ -22,14 +23,11 @@ export function Layout() {
             </span>
             <div className="leading-tight">
               <div className="font-semibold tracking-tight">PDFTranslate</div>
-              <div className="font-mono text-[10px] uppercase tracking-widest text-text-3">
-                AI · 本地优先
-              </div>
             </div>
           </div>
 
           <nav className="flex flex-col gap-1">
-            {nav.map(({ to, label, icon: Icon, end }) => (
+            {nav.map(({ to, labelKey, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -44,7 +42,7 @@ export function Layout() {
                 }
               >
                 <Icon className="size-4" />
-                {label}
+                {t(labelKey)}
               </NavLink>
             ))}
           </nav>
@@ -52,10 +50,10 @@ export function Layout() {
           <button
             onClick={toggleTheme}
             className={cn(styles.buttonGhost, styles.press, "mt-auto")}
-            aria-label="切换主题"
+            aria-label={t("nav.themeToggle")}
           >
             {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            {theme === "dark" ? "浅色" : "深色"}
+            {theme === "dark" ? t("nav.light") : t("nav.dark")}
           </button>
         </aside>
 

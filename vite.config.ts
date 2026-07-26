@@ -9,6 +9,10 @@ const base = process.env.VITE_BASE ?? "/";
 
 export default defineConfig({
   base,
+  // All app data lives in IndexedDB, which is scoped per origin. Falling back to
+  // another port on a conflict would silently hand the app an empty database
+  // (documents, glossaries and settings all appear wiped), so fail loudly instead.
+  server: { port: 5173, strictPort: true },
   plugins: [
     react(),
     tailwindcss(),
@@ -18,7 +22,8 @@ export default defineConfig({
       manifest: {
         name: "PDFTranslate",
         short_name: "PDFTranslate",
-        description: "AI PDF 翻译器 · 保持排版 · 本地优先",
+        // Build-time, so it can't follow the UI language; English reaches the most people.
+        description: "AI PDF translator · layout preserved · local-first",
         theme_color: "#0f1821",
         background_color: "#061118",
         display: "standalone",

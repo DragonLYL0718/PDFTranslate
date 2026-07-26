@@ -1,23 +1,31 @@
 import { useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Plus, Trash2, Upload, Download, BookMarked } from "lucide-react";
+import { Plus, Trash2, Upload, Download, BookMarked, Star, Filter } from "lucide-react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { styles } from "@/lib/styles";
+import { Modal } from "@/components/Modal";
 import { db } from "@/db/db";
+import { useSettings } from "@/store/useSettings";
 import {
   addTerm,
-  createGlossary,
+  createDefaultGlossary,
   deleteGlossary,
   deleteTerm,
+  glossaryName,
   importTerms,
   parseCsv,
   renameGlossary,
+  setDefaultGlossary,
   termsToCsv,
   updateTerm,
 } from "./store";
+import { PruneDialog } from "./PruneDialog";
 import type { Term } from "@/types";
 
 export function GlossaryPage() {
+  const settings = useSettings();
+  const [dialog, setDialog] = useState<"prune" | "delete" | null>(null);
   const glossaries = useLiveQuery(() => db.glossaries.orderBy("createdAt").toArray(), [], []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const current = glossaries?.find((g) => g.id === selectedId) ?? glossaries?.[0] ?? null;
@@ -50,7 +58,7 @@ export function GlossaryPage() {
     const blob = new Blob([termsToCsv(terms)], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${current.name}.csv`;
+    a.download = `${glossaryName(current)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -58,9 +66,9 @@ export function GlossaryPage() {
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">
-        <span className={styles.kicker}>术语库</span>
-        <h1 className={styles.pageTitle}>专有名词</h1>
-        <p className={styles.muted}>维护术语对照，保证翻译一致。翻译时会注入这些术语，并自动抽取新术语入库。</p>
+        <span className={styles.kicker}>{t("glossary.kicker")}</span>
+        <h1 className={styles.pageTitle}>{t("glossary.title")}</h1>
+        <p className={styles.muted}>{t("glossary.subtitle")}</p>
       </header>
 
       {/* Glossary chips */}
@@ -76,16 +84,20 @@ export function GlossaryPage() {
                 : "border-border-subtle text-text-2 hover:bg-surface-2",
             )}
           >
-            <BookMarked className="size-3.5" />
-            {g.name}
-            {g.kind === "auto" && <span className="text-xs text-text-3">自动</span>}
+            {g.id === settings.defaultGlossaryId ? (
+              <Star className="size-3.5 fill-amber-400 text-amber-400" />
+            ) : (
+              <BookMarked className="size-3.5" />
+            )}
+            {glossaryName(g)}
+            {g.kind === "auto" && <span className="text-xs text-text-3">{t("glossary.auto")}</span>}
           </button>
         ))}
         <button
           className={cn(styles.buttonGhost, styles.press, "px-3 py-1.5 text-sm")}
-          onClick={async () => setSelectedId(await createGlossary("新术语库"))}
+          onClick={async () => setSelectedId(await createDefaultGlossary())}
         >
-          <Plus className="size-4" /> 新建
+          <Plus className="size-4" /> {t("glossary.new")}
         </button>
       </div>
 
@@ -95,22 +107,46 @@ export function GlossaryPage() {
           <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle p-3">
             <input
               className={cn(styles.input, "max-w-56 flex-1 font-medium")}
-              value={current.name}
+              value={glossaryName(current)}
               onChange={(e) => renameGlossary(current.id, e.target.value)}
             />
-            <span className="text-xs text-text-3">{terms?.length ?? 0} 条</span>
+            <span className="text-xs text-text-3">{t("glossary.count", { count: terms?.length ?? 0 })}</span>
             <div className="ml-auto flex gap-2">
+              <button
+                className={cn(
+                  styles.buttonGhost,
+                  styles.press,
+                  "px-3 py-1.5 text-xs",
+                  current.id === settings.defaultGlossaryId && "border-amber-400 text-amber-500",
+                )}
+                onClick={() =>
+                  setDefaultGlossary(current.id === settings.defaultGlossaryId ? null : current.id)
+                }
+                title={t("glossary.setDefaultTitle")}
+              >
+                <Star
+                  className={cn("size-3.5", current.id === settings.defaultGlossaryId && "fill-amber-400")}
+                />
+                {current.id === settings.defaultGlossaryId ? t("glossary.isDefault") : t("glossary.setDefault")}
+              </button>
+              <button
+                className={cn(styles.buttonGhost, styles.press, "px-3 py-1.5 text-xs")}
+                onClick={() => setDialog("prune")}
+                title={t("glossary.pruneTitle")}
+              >
+                <Filter className="size-3.5" /> {t("glossary.prune")}
+              </button>
               <button className={cn(styles.buttonGhost, styles.press, "px-3 py-1.5 text-xs")} onClick={() => fileInput.current?.click()}>
-                <Upload className="size-3.5" /> 导入
+                <Upload className="size-3.5" /> {t("glossary.import")}
               </button>
               <button className={cn(styles.buttonGhost, styles.press, "px-3 py-1.5 text-xs")} onClick={exportCsv}>
-                <Download className="size-3.5" /> 导出
+                <Download className="size-3.5" /> {t("glossary.export")}
               </button>
               <button
                 className={cn(styles.buttonGhost, styles.press, "px-3 py-1.5 text-xs text-red-500")}
-                onClick={() => confirm(`删除术语库「${current.name}」？`) && deleteGlossary(current.id)}
+                onClick={() => setDialog("delete")}
               >
-                <Trash2 className="size-3.5" /> 删除库
+                <Trash2 className="size-3.5" /> {t("glossary.deleteGlossary")}
               </button>
               <input
                 ref={fileInput}
@@ -124,8 +160,8 @@ export function GlossaryPage() {
 
           {/* Add row */}
           <div className="flex gap-2 border-b border-border-subtle p-3">
-            <input className={styles.input} placeholder="原文术语" value={draft.source} onChange={(e) => setDraft({ ...draft, source: e.target.value })} />
-            <input className={styles.input} placeholder="译文" value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })} />
+            <input className={styles.input} placeholder={t("glossary.sourcePlaceholder")} value={draft.source} onChange={(e) => setDraft({ ...draft, source: e.target.value })} />
+            <input className={styles.input} placeholder={t("glossary.targetPlaceholder")} value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })} />
             <button
               className={cn(styles.button, styles.press, "shrink-0")}
               disabled={!draft.source.trim()}
@@ -134,18 +170,50 @@ export function GlossaryPage() {
                 setDraft({ source: "", target: "" });
               }}
             >
-              <Plus className="size-4" /> 添加
+              <Plus className="size-4" /> {t("common.add")}
             </button>
           </div>
 
           {/* Terms */}
           <div className="flex flex-col divide-y divide-border-subtle">
-            {terms?.length === 0 && <p className="p-6 text-center text-sm text-text-3">还没有术语。</p>}
+            {terms?.length === 0 && <p className="p-6 text-center text-sm text-text-3">{t("glossary.empty")}</p>}
             {terms?.map((t) => (
               <TermRow key={t.id} term={t} />
             ))}
           </div>
         </div>
+      )}
+
+      {current && dialog === "prune" && (
+        <PruneDialog glossary={current} onClose={() => setDialog(null)} />
+      )}
+      {current && dialog === "delete" && (
+        <Modal
+          open
+          onClose={() => setDialog(null)}
+          title={t("glossary.deleteTitle", { name: glossaryName(current) })}
+          footer={
+            <>
+              <button className={cn(styles.buttonGhost, styles.press)} onClick={() => setDialog(null)}>
+                {t("common.cancel")}
+              </button>
+              <button
+                className={cn(styles.button, styles.press, "bg-red-500 hover:bg-red-600")}
+                onClick={async () => {
+                  await deleteGlossary(current.id);
+                  setSelectedId(null);
+                  setDialog(null);
+                }}
+              >
+                <Trash2 className="size-4" /> {t("common.delete")}
+              </button>
+            </>
+          }
+        >
+          <p className="text-sm text-text-2">
+            {t("glossary.deleteBody", { count: terms?.length ?? 0 })}
+          </p>
+        </Modal>
       )}
     </div>
   );
@@ -165,11 +233,11 @@ function TermRow({ term }: { term: Term }) {
         defaultValue={term.target}
         onBlur={(e) => e.target.value !== term.target && updateTerm(term.id, { target: e.target.value })}
       />
-      {term.origin === "auto" && <span className={cn(styles.chip, "shrink-0")}>自动</span>}
+      {term.origin === "auto" && <span className={cn(styles.chip, "shrink-0")}>{t("glossary.auto")}</span>}
       <button
         className="shrink-0 rounded-control p-2 text-text-3 hover:bg-surface-2 hover:text-red-500"
         onClick={() => deleteTerm(term.id)}
-        aria-label="删除术语"
+        aria-label={t("terms.delete")}
       >
         <Trash2 className="size-4" />
       </button>

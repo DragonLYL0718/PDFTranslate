@@ -1,3 +1,4 @@
+import { t, tExport } from "@/i18n";
 import { db } from "@/db/db";
 import { PDFDocument, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
@@ -6,7 +7,7 @@ import cjkFontUrl from "@/assets/fonts/NotoSansSC-Regular.ttf?url";
 /** Fetch the bundled CJK font (same-origin asset — no external network dependency). */
 async function fetchCjkFont(): Promise<Uint8Array> {
   const res = await fetch(cjkFontUrl);
-  if (!res.ok) throw new Error("无法加载中文字体资源");
+  if (!res.ok) throw new Error(t("export.noFont"));
   return new Uint8Array(await res.arrayBuffer());
 }
 
@@ -120,7 +121,7 @@ export async function exportTranslatedPdf(
   options: ExportOptions,
 ): Promise<Uint8Array> {
   const doc = await db.documents.get(docId);
-  if (!doc) throw new Error("文档不存在");
+  if (!doc) throw new Error(t("error.docNotFound"));
 
   if (options.mode === "original") {
     return new Uint8Array(doc.data);
@@ -136,7 +137,7 @@ export async function exportTranslatedPdf(
     (a, b) => a.pageNumber - b.pageNumber,
   );
   const hasTranslation = pages.some((p) => Object.keys(p.translations).length > 0);
-  if (!hasTranslation) throw new Error("该文档还没有可用的翻译内容");
+  if (!hasTranslation) throw new Error(t("export.noTranslation"));
 
   const srcPdf = await PDFDocument.load(doc.data, { ignoreEncryption: true });
   const outPdf = await PDFDocument.create();
@@ -162,10 +163,10 @@ export async function exportTranslatedPdf(
     const annots = await db.annotations.where("docId").equals(docId).toArray();
     if (annots.length) {
       const page = outPdf.addPage();
-      page.drawText(`标注摘要 (${doc.name})`, { x: 50, y: page.getHeight() - 50, size: 16, font: cjkFont });
+      page.drawText(tExport("export.annotationsTitle", { name: doc.name }), { x: 50, y: page.getHeight() - 50, size: 16, font: cjkFont });
       let y = page.getHeight() - 80;
       for (const a of annots) {
-        page.drawText(`第${a.pageNumber}页: ${a.comment}`, { x: 50, y, size: 10, font: cjkFont, color: rgb(0.3, 0.3, 0.3) });
+        page.drawText(tExport("export.annotationLine", { page: a.pageNumber, comment: a.comment }), { x: 50, y, size: 10, font: cjkFont, color: rgb(0.3, 0.3, 0.3) });
         y -= 18;
         if (y < 40) break;
       }
@@ -178,7 +179,7 @@ export async function exportTranslatedPdf(
 /** Export pages as plain Markdown text. */
 export async function exportMarkdown(docId: string, bilingual = true): Promise<string> {
   const doc = await db.documents.get(docId);
-  if (!doc) throw new Error("文档不存在");
+  if (!doc) throw new Error(t("error.docNotFound"));
 
   const pages = (await db.pages.where("docId").equals(docId).toArray()).sort(
     (a, b) => a.pageNumber - b.pageNumber,
@@ -186,7 +187,7 @@ export async function exportMarkdown(docId: string, bilingual = true): Promise<s
 
   let md = `# ${doc.name}\n\n`;
   for (const p of pages) {
-    md += `## 第${p.pageNumber}页\n\n`;
+    md += `## ${t("export.mdPageHeading", { page: p.pageNumber })}\n\n`;
     for (const b of p.blocks) {
       const t = p.translations[b.id];
       if (t) {

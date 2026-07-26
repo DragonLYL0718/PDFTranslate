@@ -1,4 +1,5 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import { t } from "@/i18n";
 import type { DocPage, LangCode, Provider } from "@/types";
 import { extractPage } from "@/features/pdf/pdf";
 import { translateSegments, type GlossaryEntry, type TranslateParams } from "@/features/providers/translate";
@@ -35,7 +36,7 @@ async function translateWithFallback(
       lastErr = e;
     }
   }
-  throw lastErr ?? new Error("没有可用的翻译提供商");
+  throw lastErr ?? new Error(t("error.noTranslationProvider"));
 }
 
 /** Group the given segment indices into batches bounded by CHAR_BUDGET. */
