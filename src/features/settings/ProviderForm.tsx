@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Eye, EyeOff, ListRestart, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Eye, EyeOff, ListRestart, Loader2 } from "lucide-react";
 import { Modal } from "@/components/Modal";
 import { t, type PlainKey } from "@/i18n";
 import { cn } from "@/lib/cn";
@@ -11,6 +11,20 @@ import { isNetworkError } from "@/features/providers/net";
 import { useProxyDialog } from "@/store/proxyDialog";
 import { useSettings } from "@/store/useSettings";
 import type { Provider, ReasoningLevel } from "@/types";
+
+/**
+ * Password managers see the text fields sitting above the API key input and
+ * offer to autofill them as a login, covering our own dropdown. Opt out with
+ * every vendor's ignore hint.
+ */
+const NO_AUTOFILL = {
+  autoComplete: "off",
+  "data-1p-ignore": "true",
+  "data-lpignore": "true",
+  "data-bwignore": "true",
+  "data-protonpass-ignore": "true",
+  "data-form-type": "other",
+} as const;
 
 const REASONING: { value: ReasoningLevel; labelKey: PlainKey }[] = [
   { value: "off", labelKey: "provider.reasoningOff" },
@@ -93,7 +107,7 @@ export function ProviderForm({ initial, isNew, onClose }: Props) {
         )}
 
         <Field label={t("provider.name")}>
-          <input className={styles.input} value={p.name} // Typing a name opts the provider out of following the UI language.
+          <input {...NO_AUTOFILL} className={styles.input} value={p.name} // Typing a name opts the provider out of following the UI language.
             onChange={(e) => set({ name: e.target.value, nameKey: undefined })} />
         </Field>
 
@@ -106,19 +120,17 @@ export function ProviderForm({ initial, isNew, onClose }: Props) {
         </Field>
 
         <Field label="Base URL" hint={t("provider.baseUrlHint")}>
-          <input className={styles.input} value={p.baseURL} onChange={(e) => set({ baseURL: e.target.value })} placeholder="https://..." />
+          <input {...NO_AUTOFILL} className={styles.input} value={p.baseURL} onChange={(e) => set({ baseURL: e.target.value })} placeholder="https://..." />
         </Field>
 
         <Field label={t("provider.model")} hint={modelMsg ?? undefined}>
           <div className="flex gap-2">
-            <input
-              className={cn(styles.input, "flex-1")}
-              list="pf-models"
+            <ModelPicker
               value={p.model}
-              onChange={(e) => set({ model: e.target.value })}
+              models={models}
+              onChange={(model) => set({ model })}
               placeholder={t("provider.modelPlaceholder")}
             />
-            <datalist id="pf-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
             <button
               className={cn(styles.buttonGhost, styles.press, "shrink-0")}
               onClick={loadModels}
@@ -161,6 +173,89 @@ export function ProviderForm({ initial, isNew, onClose }: Props) {
         </details>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Free-text model field with a dropdown of the fetched models. A native
+ * <datalist> would be simpler, but its popup loses to password-manager
+ * overlays and can't be opened by click in every browser.
+ */
+function ModelPicker({ value, models, onChange, placeholder }: {
+  value: string;
+  models: string[];
+  onChange: (model: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation(); // close the list, not the whole dialog
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const q = value.trim().toLowerCase();
+  const matches = models.filter((m) => m.toLowerCase().includes(q));
+  // Typing something unmatched shouldn't blank the list — fall back to all.
+  const list = matches.length ? matches : models;
+
+  return (
+    <div className="relative flex-1" ref={box}>
+      <input
+        {...NO_AUTOFILL}
+        className={cn(styles.input, models.length && "pr-9")}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onClick={() => setOpen(true)}
+        placeholder={placeholder}
+      />
+      {models.length > 0 && (
+        <>
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-3"
+            onClick={() => setOpen((v) => !v)}
+            aria-label={placeholder}
+          >
+            <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
+          </button>
+          {open && (
+            <ul className={cn(styles.card, "absolute z-10 mt-1 max-h-56 w-full overflow-y-auto py-1 pretty-scrollbar")}>
+              {list.map((m) => (
+                <li key={m}>
+                  <button
+                    type="button"
+                    className={cn(
+                      "block w-full truncate px-3 py-1.5 text-left text-sm hover:bg-surface-2",
+                      m === value ? "text-accent" : "text-text-1",
+                    )}
+                    // mousedown + preventDefault: the wrapping <label> would
+                    // otherwise bounce the click back to the input.
+                    onMouseDown={(e) => { e.preventDefault(); onChange(m); setOpen(false); }}
+                  >
+                    {m}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
