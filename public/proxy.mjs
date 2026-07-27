@@ -47,6 +47,12 @@ const server = http.createServer(async (req, res) => {
   setCors(res, origin);
 
   if (req.method === "OPTIONS") {
+    // A page served over https reaching http://localhost is a Private Network
+    // Access request: the browser preflights it and drops the call unless we
+    // answer with this header. Only for origins on the allowlist above.
+    if (req.headers["access-control-request-private-network"] && allowedOrigin(origin)) {
+      res.setHeader("Access-Control-Allow-Private-Network", "true");
+    }
     res.writeHead(204);
     res.end();
     return;

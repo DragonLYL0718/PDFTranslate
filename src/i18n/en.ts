@@ -344,6 +344,8 @@ export const en: Catalog = {
   "babeldoc.tipInstalled": "Check that BabelDOC is installed:",
   "babeldoc.tipHealth": "Check the backend is healthy:",
   "babeldoc.tipHttp": "The address must be http, not https:",
+  "babeldoc.tipHttps":
+    "If the browser blocks this https page from reaching a local address (Safari always does), open the app from the backend itself — its library is a separate one, since data is per-origin:",
   "babeldoc.viewSource": "View the install script's source",
   "babeldoc.download": "Download",
   "babeldoc.sourceLoadFailed": "// Could not load",

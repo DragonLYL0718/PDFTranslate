@@ -188,30 +188,59 @@ function ModelPicker({ value, models, onChange, placeholder }: {
   placeholder: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
   const box = useRef<HTMLDivElement>(null);
+  const listBox = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
       if (!box.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation(); // close the list, not the whole dialog
-      setOpen(false);
-    };
     document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("pointerdown", onDown);
   }, [open]);
 
   const q = value.trim().toLowerCase();
   const matches = models.filter((m) => m.toLowerCase().includes(q));
   // Typing something unmatched shouldn't blank the list — fall back to all.
   const list = matches.length ? matches : models;
+  // The list shrinks as you type, so the highlight can outrun it.
+  const idx = Math.min(active, list.length - 1);
+
+  useEffect(() => {
+    if (!open) return;
+    (listBox.current?.children[idx] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+  }, [open, idx]);
+
+  function pick(model: string) {
+    onChange(model);
+    setOpen(false);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      if (!open) return;
+      e.stopPropagation(); // close the list, not the whole dialog
+      setOpen(false);
+      return;
+    }
+    if (e.key === "Enter") {
+      if (!open || !list[idx]) return;
+      e.preventDefault();
+      pick(list[idx]);
+      return;
+    }
+    if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || !list.length) return;
+    e.preventDefault(); // keep the caret put instead of jumping to either end
+    if (!open) {
+      setOpen(true);
+      setActive(0);
+      return;
+    }
+    const step = e.key === "ArrowDown" ? 1 : -1;
+    setActive((idx + step + list.length) % list.length);
+  }
 
   return (
     <div className="relative flex-1" ref={box}>
@@ -219,9 +248,14 @@ function ModelPicker({ value, models, onChange, placeholder }: {
         {...NO_AUTOFILL}
         className={cn(styles.input, models.length && "pr-9")}
         value={value}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(0); }}
         onClick={() => setOpen(true)}
+        onKeyDown={onKeyDown}
         placeholder={placeholder}
+        role="combobox"
+        aria-expanded={open}
+        aria-controls="pf-models"
+        aria-activedescendant={open && list[idx] ? `pf-model-${idx}` : undefined}
       />
       {models.length > 0 && (
         <>
@@ -234,21 +268,29 @@ function ModelPicker({ value, models, onChange, placeholder }: {
             <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
           </button>
           {open && (
-            <ul className={cn(styles.card, "absolute z-10 mt-1 max-h-56 w-full overflow-y-auto py-1 pretty-scrollbar")}>
-              {list.map((m) => (
-                <li key={m}>
-                  <button
-                    type="button"
-                    className={cn(
-                      "block w-full truncate px-3 py-1.5 text-left text-sm hover:bg-surface-2",
-                      m === value ? "text-accent" : "text-text-1",
-                    )}
-                    // mousedown + preventDefault: the wrapping <label> would
-                    // otherwise bounce the click back to the input.
-                    onMouseDown={(e) => { e.preventDefault(); onChange(m); setOpen(false); }}
-                  >
-                    {m}
-                  </button>
+            <ul
+              id="pf-models"
+              ref={listBox}
+              role="listbox"
+              className={cn(styles.card, "absolute z-10 mt-1 max-h-56 w-full overflow-y-auto py-1 pretty-scrollbar")}
+            >
+              {list.map((m, i) => (
+                <li
+                  key={m}
+                  id={`pf-model-${i}`}
+                  role="option"
+                  aria-selected={m === value}
+                  className={cn(
+                    "cursor-pointer truncate px-3 py-1.5 text-sm",
+                    i === idx && "bg-surface-2",
+                    m === value ? "text-accent" : "text-text-1",
+                  )}
+                  // mousedown + preventDefault: the wrapping <label> would
+                  // otherwise bounce the click back to the input.
+                  onMouseDown={(e) => { e.preventDefault(); pick(m); }}
+                  onMouseEnter={() => setActive(i)}
+                >
+                  {m}
                 </li>
               ))}
             </ul>

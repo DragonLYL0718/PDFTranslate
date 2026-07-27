@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = [
     "fastapi>=0.115",
+    # `allow_private_network` on CORSMiddleware landed in 0.51 — without it the
+    # https-hosted app can't reach this backend on localhost.
+    "starlette>=0.51",
     "uvicorn[standard]>=0.34",
     "python-multipart>=0.0.18",
 ]

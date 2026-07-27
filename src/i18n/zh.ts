@@ -317,6 +317,7 @@ export const zh = {
   "babeldoc.tipInstalled": "检查 BabelDOC 是否安装：",
   "babeldoc.tipHealth": "验证后端健康：",
   "babeldoc.tipHttp": "地址须为 http（不是 https）：",
+  "babeldoc.tipHttps": "若浏览器拦截 https 页面访问本地地址（Safari 一定拦截），改从后端自带的地址打开本应用（资料库按域名隔离，是独立的一份）：",
   "babeldoc.viewSource": "查看安装脚本源码",
   "babeldoc.download": "下载",
   "babeldoc.sourceLoadFailed": "// 无法加载",

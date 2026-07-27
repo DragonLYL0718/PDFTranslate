@@ -67,6 +67,14 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    # A page served over https (the GitHub Pages deployment) reaching
+    # http://localhost is a Private Network Access request: the browser sends a
+    # preflight carrying `Access-Control-Request-Private-Network: true` and
+    # fails the call unless we answer with the matching allow header. Without
+    # this every request from the hosted app dies before it arrives, and the app
+    # can only report "backend unreachable". The origin allowlist above is what
+    # keeps this safe — it is not an opening to arbitrary pages.
+    allow_private_network=True,
     # Without this the browser can't read our custom response header.
     expose_headers=["X-Report-Id"],
 )

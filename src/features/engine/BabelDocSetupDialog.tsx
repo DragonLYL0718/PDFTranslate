@@ -175,6 +175,18 @@ export function BabelDocSetupDialog() {
                 <li>{t("babeldoc.tipInstalled")} <code className="text-text-2">babeldoc --version</code></li>
                 <li>{t("babeldoc.tipHealth")} <code className="text-text-2">curl http://localhost:8787/api/health</code></li>
                 <li>{t("babeldoc.tipHttp")} <code className="text-text-2">http://localhost:8787</code></li>
+                {/* Hosted over https, the browser — always Safari, sometimes
+                    Chrome's local-network prompt — may refuse to reach a local
+                    address at all. The backend serves this same app, so its own
+                    origin is the way out. */}
+                {location.protocol === "https:" && (
+                  <li>
+                    {t("babeldoc.tipHttps")}{" "}
+                    <a href={settings.babelDocUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline">
+                      {settings.babelDocUrl}
+                    </a>
+                  </li>
+                )}
               </ul>
             </div>
           )}

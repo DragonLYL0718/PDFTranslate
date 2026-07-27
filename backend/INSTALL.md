@@ -129,6 +129,37 @@ Checklist:
    - The backend should print the BabelDOC version on startup
    - If it shows "⚠️ frontend files not found", run `npm run build` and restart
 
+### ❌ Backend unreachable from the hosted (https) site only
+
+The backend answers `curl` and works from `http://localhost:5173`, but the
+GitHub Pages site reports "can't reach the backend". An https page calling
+`http://localhost` is a *private network* request, and browsers guard it:
+
+1. **Upgrade the backend.** It must answer the browser's private-network
+   preflight with `Access-Control-Allow-Private-Network: true` (needs
+   `starlette >= 0.51`). Reinstall and restart:
+   ```bash
+   uv tool install --force --python 3.12 "git+<repo>.git#subdirectory=backend"
+   ```
+   Verify — the last header must be present:
+   ```bash
+   curl -i -X OPTIONS http://localhost:8787/api/health \
+     -H "Origin: https://<your-site>" \
+     -H "Access-Control-Request-Method: GET" \
+     -H "Access-Control-Request-Private-Network: true"
+   ```
+
+2. **Restart after changing the origin allowlist.** `ALLOWED_ORIGIN_REGEX`
+   is read at import time, so a backend started before the change still
+   rejects the new origin.
+
+3. **Safari can't do this at all.** It blocks https → `http://localhost` as
+   mixed content, and Chrome may additionally ask for local-network
+   permission. The way around it is to skip the hosted page: open
+   http://localhost:8787, which the backend serves itself (same origin, no
+   guard). Note that browser storage is per-origin, so that copy has its own
+   separate library.
+
 ### ❌ "npm run build fails"
 
 ```bash

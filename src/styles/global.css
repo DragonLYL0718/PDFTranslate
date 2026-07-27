@@ -76,6 +76,11 @@
   color-scheme: dark;
 }
 
+/* Always reserve the scrollbar gutter so page width stays stable across routes */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background-color: var(--bg);
   color: var(--text-1);
