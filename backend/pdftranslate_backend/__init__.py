@@ -54,7 +54,11 @@ app = FastAPI(
 #
 # NOTE: Starlette matches `allow_origins` entries as exact strings (globs like
 # "http://localhost:*" never match), so port wildcards need the regex form.
-ALLOWED_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://[\w-]+\.github\.io"
+ALLOWED_ORIGIN_REGEX = (
+    r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+    r"|https://[\w-]+\.github\.io"
+    r"|https://pdftranslate\.rayleigh-lin\.top"
+)
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX)
 
 app.add_middleware(

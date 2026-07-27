@@ -16,11 +16,19 @@ import http from "node:http";
 const PORT = +(process.env.PORT || 8788);
 
 // Only these browser origins may use the proxy (prevents random sites abusing it).
+// Includes the app's own custom domain, not just the github.io default — a fork
+// on another domain can add it with ALLOW_ORIGIN=https://my.site node proxy.mjs.
 const ALLOW_ORIGINS = [
   /^https?:\/\/localhost(:\d+)?$/,
   /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  /\.github\.io$/,
+  /^https:\/\/[\w-]+\.github\.io$/,
+  /^https:\/\/pdftranslate\.rayleigh-lin\.top$/,
 ];
+
+if (process.env.ALLOW_ORIGIN) {
+  const extra = process.env.ALLOW_ORIGIN.replace(/\/$/, "");
+  ALLOW_ORIGINS.push(new RegExp(`^${extra.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+}
 
 function allowedOrigin(origin) {
   if (!origin) return "*";
