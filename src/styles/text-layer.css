@@ -1,0 +1,72 @@
+/*
+ * pdf.js text layer, vendored from pdfjs-dist@4.10.38 web/pdf_viewer.css
+ * (the `.textLayer` block only). Importing the whole viewer stylesheet would
+ * drag in the annotation editor rules this app never uses, and its
+ * forced-colors / AccentColor selection colours fight the OKLCH theme.
+ *
+ * Keep in sync when bumping pdfjs-dist: diff the .textLayer block.
+ */
+
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+}
+
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  /* The wrapper sets line-height: 0 to collapse the canvas gap; glyph metrics
+     depend on this staying 1. */
+  line-height: 1;
+}
+
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+}
+
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+
+.textLayer span[role="img"] {
+  user-select: none;
+  cursor: default;
+}
+
+/* Lets a drag that runs off the bottom of the page keep selecting. */
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+/* Selection over invisible glyphs needs an explicit colour; the app accent
+   reads correctly over both the white page and a dark UI. */
+.textLayer ::selection {
+  background: color-mix(in oklch, var(--accent) 35%, transparent);
+}
+
+.textLayer br::selection {
+  background: transparent;
+}

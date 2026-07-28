@@ -64,6 +64,6 @@ export default defineConfig({
     // the *first* export/OCR triggers a dep re-optimization + full reload
     // mid-request, which races the in-flight import() and throws
     // "Failed to fetch dynamically imported module".
-    include: ["pdf-lib", "@pdf-lib/fontkit", "tesseract.js"],
+    include: ["pdf-lib", "@pdf-lib/fontkit", "tesseract.js", "react-markdown", "remark-gfm"],
   },
 });

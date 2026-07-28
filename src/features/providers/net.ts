@@ -23,11 +23,15 @@ export class ProxyUnavailableError extends Error {
 
 export function setProxyConfig(next: { enabled: boolean; url: string }): void {
   proxy = next;
+  relayHealth = null;
+  relayProbe = null;
 }
 
 /** Point the relay at the BabelDOC backend so one running service covers both. */
 export function setRelayBackend(url: string): void {
   backendUrl = url;
+  relayHealth = null;
+  relayProbe = null;
 }
 
 function headerObject(h: HeadersInit | undefined): Record<string, string> {
@@ -114,6 +118,68 @@ export async function smartFetch(url: string, init?: RequestInit): Promise<Respo
     relayHosts.add(host); // remember so the next batch skips the direct attempt
     return res;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Relay capabilities
+// ---------------------------------------------------------------------------
+
+interface RelayHealth {
+  /** Relay pipes the upstream body through instead of buffering it (SSE works). */
+  streaming: boolean;
+}
+
+let relayHealth: RelayHealth | null = null;
+let relayProbe: Promise<RelayHealth | null> | null = null;
+let relayProbedAt = 0;
+const PROBE_TTL = 30_000;
+
+/** True when a request to this URL is going through the local relay. */
+export function willRelay(url: string): boolean {
+  return proxy.enabled || relayHosts.has(originOf(url));
+}
+
+/**
+ * Capabilities of the first reachable relay. The standalone proxy answers on
+ * /health and the BabelDOC backend only on /api/health, so each candidate base
+ * is tried on both paths. A successful probe is cached until the relay config
+ * changes; a failure is retried, so starting the helper later still works.
+ */
+export async function probeRelay(): Promise<RelayHealth | null> {
+  if (relayHealth) return relayHealth;
+  if (relayProbe && Date.now() - relayProbedAt < PROBE_TTL) return relayProbe;
+  relayProbedAt = Date.now();
+  relayProbe = (async () => {
+    for (const base of relayBases()) {
+      for (const path of ["/health", "/api/health"]) {
+        try {
+          const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(3000) });
+          if (!res.ok) continue;
+          const json = await res.json();
+          if (!json?.ok) continue;
+          const health: RelayHealth = {
+            streaming: json.version >= 2 || (json.features ?? []).includes("stream"),
+          };
+          relayHealth = health;
+          return health;
+        } catch {
+          // this path/base isn't it; try the next
+        }
+      }
+    }
+    return null;
+  })();
+  return relayProbe;
+}
+
+/**
+ * Whether a streamed request to this URL will actually arrive incrementally.
+ * Direct calls always can; a relayed one only if the local helper pipes rather
+ * than buffers, which older versions don't.
+ */
+export async function canStream(url: string): Promise<boolean> {
+  if (!willRelay(url)) return true;
+  return (await probeRelay())?.streaming ?? false;
 }
 
 /** Health-check the local proxy. */

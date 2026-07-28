@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+@import "./text-layer.css";
 
 /* Class-based dark mode (mirrors rayleigh-lin.top) */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -103,6 +104,57 @@ body.preload * {
 
 ::selection {
   background: color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+/* Markdown answers in the AI chat panel. Remaps @tailwindcss/typography's
+   hardcoded grays onto the app's OKLCH tokens — since those tokens already
+   flip under `.dark`, this needs no `dark:prose-invert` counterpart. */
+.chat-prose {
+  --tw-prose-body: var(--text-2);
+  --tw-prose-headings: var(--text-1);
+  --tw-prose-lead: var(--text-2);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bold: var(--text-1);
+  --tw-prose-counters: var(--text-3);
+  --tw-prose-bullets: var(--text-3);
+  --tw-prose-hr: var(--border-subtle);
+  --tw-prose-quotes: var(--text-2);
+  --tw-prose-quote-borders: var(--border-strong);
+  --tw-prose-captions: var(--text-3);
+  --tw-prose-code: var(--text-1);
+  --tw-prose-pre-code: var(--text-1);
+  --tw-prose-pre-bg: var(--surface-2);
+  --tw-prose-th-borders: var(--border-strong);
+  --tw-prose-td-borders: var(--border-subtle);
+}
+
+/* Wide code and tables scroll inside the bubble instead of stretching the panel. */
+.chat-prose :is(pre, table) {
+  overflow-x: auto;
+}
+
+/* A citation just scrolled here. It breathes rather than flashing once: after a
+   smooth scroll the eye arrives late, and a single flash is often already over. */
+@keyframes cite-breathe {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.cite-flash {
+  border: 2px solid var(--accent);
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  box-shadow: var(--glow);
+  animation: cite-breathe 1.5s ease-in-out 2;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cite-flash {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* Thin, unobtrusive scrollbars */

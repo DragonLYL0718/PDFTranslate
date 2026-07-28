@@ -15,6 +15,12 @@ import { ProviderForm } from "./ProviderForm";
 import type { Provider, TermStrictness } from "@/types";
 
 // Message keys, not text: this array is built before initI18n() picks a locale.
+const CHUNK_OPTIONS: { value: number; labelKey: PlainKey }[] = [
+  { value: 3, labelKey: "chat.chunksFew" },
+  { value: 6, labelKey: "chat.chunksNormal" },
+  { value: 10, labelKey: "chat.chunksMany" },
+];
+
 const STRICTNESS_OPTIONS: { value: TermStrictness; labelKey: PlainKey }[] = [
   { value: "loose", labelKey: "settings.strictness.loose" },
   { value: "standard", labelKey: "settings.strictness.standard" },
@@ -33,6 +39,8 @@ export function SettingsPage() {
   const showProxy = useProxyDialog((s) => s.show);
   const memCount = useLiveQuery(memoryCount, [], 0) ?? 0;
   const [editing, setEditing] = useState<{ provider: Provider; isNew: boolean } | null>(null);
+  // Only the OpenAI-compatible shape exposes an /embeddings endpoint.
+  const embeddingProvider = providers.some((p) => p.enabled && p.apiKey && p.kind === "openai");
 
   async function addNew() {
     const order = await nextOrder();
@@ -151,6 +159,69 @@ export function SettingsPage() {
           >
             <Trash2 className="size-4" /> {t("settings.memory.clearBtn", { count: memCount })}
           </button>
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className={styles.sectionHeading}>{t("settings.chat.title")}</h2>
+        <label className={cn(styles.card, "flex cursor-pointer items-center justify-between p-4")}>
+          <div>
+            <div className="font-medium">{t("settings.chat.streaming")}</div>
+            <p className={styles.muted}>{t("settings.chat.streamingDesc")}</p>
+          </div>
+          <input
+            type="checkbox"
+            className="size-5 accent-[var(--accent)]"
+            checked={settings.chatStreaming}
+            onChange={(e) => patchSettings({ chatStreaming: e.target.checked })}
+          />
+        </label>
+        <label className={cn(styles.card, "flex cursor-pointer items-center justify-between gap-4 p-4")}>
+          <div>
+            <div className="font-medium">{t("settings.chat.embeddings")}</div>
+            <p className={styles.muted}>{t("settings.chat.embeddingsDesc")}</p>
+            {!embeddingProvider && (
+              <p className="mt-1 text-sm text-amber-600">{t("settings.chat.embeddingsUnavailable")}</p>
+            )}
+          </div>
+          <input
+            type="checkbox"
+            className="size-5 accent-[var(--accent)]"
+            disabled={!embeddingProvider}
+            checked={settings.chatEmbeddingsEnabled}
+            onChange={(e) => patchSettings({ chatEmbeddingsEnabled: e.target.checked })}
+          />
+        </label>
+        {settings.chatEmbeddingsEnabled && (
+          <div className={cn(styles.card, "flex flex-col gap-1.5 p-4")}>
+            <div className="font-medium">{t("settings.chat.embedModel")}</div>
+            <input
+              className={styles.input}
+              value={settings.chatEmbeddingModel}
+              onChange={(e) => patchSettings({ chatEmbeddingModel: e.target.value })}
+              spellCheck={false}
+            />
+          </div>
+        )}
+        <div className={cn(styles.card, "flex flex-col gap-3 p-4")}>
+          <div>
+            <div className="font-medium">{t("settings.chat.chunks")}</div>
+            <p className={styles.muted}>{t("settings.chat.chunksDesc")}</p>
+          </div>
+          <div className="flex gap-2 rounded-control border border-border-subtle p-1">
+            {CHUNK_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                onClick={() => patchSettings({ chatContextChunks: o.value })}
+                className={cn(
+                  "flex-1 rounded px-3 py-1.5 text-sm transition-colors",
+                  settings.chatContextChunks === o.value ? "bg-accent text-white" : "hover:bg-surface-2",
+                )}
+              >
+                {t(o.labelKey)}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 

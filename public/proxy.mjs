@@ -12,6 +12,8 @@
 // Run:  node proxy.mjs           (defaults to port 8788)
 //       PORT=9000 node proxy.mjs
 import http from "node:http";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 const PORT = +(process.env.PORT || 8788);
 
@@ -62,7 +64,9 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, name: "pdftranslate-proxy", version: 1 }));
+    // version 2 = pipes the upstream body through, so SSE survives the relay.
+    // The app checks this before asking a provider to stream.
+    res.end(JSON.stringify({ ok: true, name: "pdftranslate-proxy", version: 2, features: ["stream"] }));
     return;
   }
 
@@ -78,15 +82,32 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "missing target url" }));
         return;
       }
-      const upstream = await fetch(target, { method, headers, body: body ?? undefined });
-      const buf = Buffer.from(await upstream.arrayBuffer());
+      // Abort upstream when the browser disconnects, or every cancelled chat
+      // turn would leave a provider connection open for the life of the process.
+      const ac = new AbortController();
+      res.on("close", () => ac.abort());
+      const upstream = await fetch(target, {
+        method,
+        headers,
+        body: body ?? undefined,
+        signal: ac.signal,
+      });
+      // Only content-type is forwarded: the body is relayed as received, so
+      // passing on content-length/content-encoding could contradict it.
       res.writeHead(upstream.status, {
         "content-type": upstream.headers.get("content-type") || "application/json",
+        "cache-control": "no-cache, no-transform",
       });
-      res.end(buf);
+      // Pipe rather than buffer, so server-sent events arrive token by token.
+      if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), res);
+      else res.end();
     } catch (e) {
-      res.writeHead(502, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: String(e) }));
+      // Once the status line is out we can't turn the response into a 502.
+      if (res.headersSent) res.destroy();
+      else {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
     }
     return;
   }

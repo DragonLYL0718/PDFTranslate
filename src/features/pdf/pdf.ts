@@ -1,5 +1,6 @@
 import {
   GlobalWorkerOptions,
+  TextLayer,
   getDocument,
   Util,
   type PDFDocumentProxy,
@@ -57,6 +58,46 @@ async function renderPageNow(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   await page.render({ canvasContext: ctx, viewport }).promise;
   return { width: viewport.width, height: viewport.height };
+}
+
+// Same serialization as renderPage: a scale change mid-render would otherwise
+// leave two sets of spans stacked in the container.
+const layerQueue = new WeakMap<HTMLElement, Promise<unknown>>();
+
+/**
+ * Mount a transparent, selectable text layer over a rendered page. Positioned
+ * against the container, which must be sized exactly like the canvas — the
+ * spans carry absolute CSS-pixel offsets derived from the same viewport.
+ */
+export function renderTextLayer(
+  pdf: PDFDocumentProxy,
+  pageNumber: number,
+  scale: number,
+  container: HTMLElement,
+): Promise<void> {
+  const prev = layerQueue.get(container) ?? Promise.resolve();
+  const result = prev.then(() => renderTextLayerNow(pdf, pageNumber, scale, container));
+  layerQueue.set(container, result.catch(() => {}));
+  return result;
+}
+
+async function renderTextLayerNow(
+  pdf: PDFDocumentProxy,
+  pageNumber: number,
+  scale: number,
+  container: HTMLElement,
+): Promise<void> {
+  const page = await pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale });
+  container.replaceChildren();
+  // pdf.js reads this to size glyphs; harmless now, required by older majors.
+  container.style.setProperty("--scale-factor", String(scale));
+  const layer = new TextLayer({
+    textContentSource: page.streamTextContent(),
+    container,
+    viewport,
+  });
+  await layer.render();
 }
 
 /** Extract text (grouped into blocks) and page geometry, in PDF points, top-left origin. */

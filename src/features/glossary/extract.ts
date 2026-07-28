@@ -3,8 +3,8 @@ import { t } from "@/i18n";
 import type { LangCode, Provider, Term, TermStrictness } from "@/types";
 import { llmComplete } from "@/features/providers/translate";
 import { langPromptName } from "@/features/import/languages";
-import { extractPage, loadDocument } from "@/features/pdf/pdf";
 import { buildChain } from "@/features/providers/store";
+import { collectParallelText } from "@/features/chat/corpus";
 import { resolveTermTarget, upsertAutoTerms } from "./store";
 
 /**
@@ -83,7 +83,8 @@ export async function extractAndSaveTerms(
   // Google Free has no chat endpoint, so there is nothing to extract terms with.
   if (!provider) throw new Error(t("error.termsNeedProvider"));
 
-  const pairs = await collectParallelText(docId);
+  // maxPages caps engine B re-extraction: this only samples 40 pairs anyway.
+  const pairs = await collectParallelText(docId, { maxPages: 8, signal });
   if (!pairs.length) throw new Error(t("error.termsNoPairs"));
 
   const strictness = (await readSettings()).termStrictness;
@@ -92,41 +93,6 @@ export async function extractAndSaveTerms(
 
   await upsertAutoTerms(await resolveTermTarget(docId, docName), terms);
   return terms.length;
-}
-
-/**
- * Parallel source/target text for a document. Engine A has it block-by-block in
- * `pages`; engine B only leaves behind a translated PDF, so fall back to pairing
- * the two PDFs page by page — coarser, but the model only needs to see a term
- * next to its translation, not aligned paragraphs.
- */
-async function collectParallelText(docId: string): Promise<[string, string][]> {
-  const rows = (await db.pages.where("docId").equals(docId).toArray()).sort(
-    (a, b) => a.pageNumber - b.pageNumber,
-  );
-  const pairs: [string, string][] = [];
-  for (const p of rows) {
-    for (const b of p.blocks) {
-      const translated = p.translations[b.id];
-      if (translated && b.text.length < 400) pairs.push([b.text, translated]);
-    }
-  }
-  if (pairs.length) return pairs;
-
-  const doc = await db.documents.get(docId);
-  if (!doc?.translatedData) return [];
-  const [original, translated] = await Promise.all([
-    loadDocument(doc.data),
-    loadDocument(doc.translatedData),
-  ]);
-  const count = Math.min(original.numPages, translated.numPages);
-  for (const n of sample(Array.from({ length: count }, (_, i) => i + 1), 8)) {
-    const [a, b] = await Promise.all([extractPage(original, n), extractPage(translated, n)]);
-    const src = a.blocks.map((x) => x.text).join("\n").slice(0, 3000);
-    const dst = b.blocks.map((x) => x.text).join("\n").slice(0, 3000);
-    if (src && dst) pairs.push([src, dst]);
-  }
-  return pairs;
 }
 
 async function askForTerms(

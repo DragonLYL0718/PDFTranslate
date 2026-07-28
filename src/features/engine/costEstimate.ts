@@ -27,6 +27,21 @@ function rateFor(model: string): { input: number; output: number } {
   return MODEL_RATES[model] ?? { input: 2, output: 8 }; // fallback ~gpt-4o-ish
 }
 
+/** Embedding rates per 1M input tokens; there is no output side. */
+const EMBEDDING_RATES: Record<string, number> = {
+  "text-embedding-3-small": 0.02,
+  "text-embedding-3-large": 0.13,
+  "text-embedding-ada-002": 0.1,
+};
+
+/** What indexing a document with embeddings costs, as a display string. */
+export function estimateEmbeddingCost(model: string, totalChars: number): string {
+  const rate = EMBEDDING_RATES[model] ?? 0.05;
+  const usd = ((totalChars / 4) * rate) / 1_000_000;
+  if (usd === 0) return t("common.free");
+  return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
+}
+
 /** Estimate total characters *across all pages* for a document. */
 export interface CostEstimate {
   totalChars: number;

@@ -24,7 +24,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # -- config ---------------------------------------------------------------
@@ -40,6 +40,11 @@ VERSION = "0.1.0"
 # whose LLM call raised), and a long document needs a longer timeout.
 QPS = int(os.environ.get("BABELDOC_QPS", "4"))
 TIMEOUT = int(os.environ.get("BABELDOC_TIMEOUT", "1800"))
+
+# Socket timeout for relayed provider calls. urllib applies this per read, not
+# to the whole exchange, so a stream that keeps producing tokens never trips it
+# — this only bounds silence (e.g. a long first token behind extended thinking).
+PROXY_TIMEOUT = int(os.environ.get("PROXY_TIMEOUT", "300"))
 
 # -- app ------------------------------------------------------------------
 app = FastAPI(
@@ -100,8 +105,9 @@ async def health():
         "version": VERSION,
         "babeldoc": _babeldoc_version(),
         # Lets the app tell "this backend predates per-run reports, restart it"
-        # apart from "this run genuinely produced no terms".
-        "features": ["report"],
+        # apart from "this run genuinely produced no terms". "stream" means
+        # /proxy pipes the upstream body through, so relayed SSE arrives live.
+        "features": ["report", "stream"],
     }
 
 
@@ -353,7 +359,8 @@ async def proxy(request: Request):
     headers = payload.get("headers") or {}
     body = payload.get("body")
 
-    def _forward():
+    def _open():
+        """Start the upstream call and hand back the still-unread response."""
         data = body.encode("utf-8") if isinstance(body, str) else body
         # urllib's default UA ("Python-urllib/x") is blocked by some gateways
         # (e.g. Cloudflare-fronted providers → 403). Present as a normal client.
@@ -365,17 +372,38 @@ async def proxy(request: Request):
             )
         req = urllib.request.Request(target, data=data, method=method, headers=hdrs)
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                return resp.status, resp.headers.get("content-type", "application/json"), resp.read()
+            resp = urllib.request.urlopen(req, timeout=PROXY_TIMEOUT)
+            return resp.status, resp.headers.get("content-type", "application/json"), resp
         except urllib.error.HTTPError as e:
             # Pass provider error responses (401/429/…) through with their body.
-            return e.code, e.headers.get("content-type", "application/json"), e.read()
+            return e.code, e.headers.get("content-type", "application/json"), e
 
     try:
-        status, ctype, content = await asyncio.to_thread(_forward)
-        return Response(content=content, status_code=status, media_type=ctype)
+        status, ctype, resp = await asyncio.to_thread(_open)
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": str(e)})
+
+    async def relay():
+        # read1() hands back whatever one socket read produced; plain read(n)
+        # blocks until it has all n bytes, which would re-buffer the stream and
+        # stall a chat reply until the model finished. Runs off the event loop.
+        try:
+            while True:
+                chunk = await asyncio.to_thread(resp.read1, 65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            await asyncio.to_thread(resp.close)
+
+    # Only content-type is forwarded — the body is relayed as received, so
+    # passing on content-length/content-encoding could contradict it.
+    return StreamingResponse(
+        relay(),
+        status_code=status,
+        media_type=ctype,
+        headers={"cache-control": "no-cache, no-transform", "x-accel-buffering": "no"},
+    )
 
 
 # -- serve SPA (optional) ------------------------------------------------

@@ -25,5 +25,9 @@ export const styles = {
   input:
     "w-full rounded-control border border-border-subtle bg-surface-1 px-3 py-2 text-sm text-text-1 outline-none transition-colors focus:border-accent placeholder:text-text-3",
 
+  // Height is set imperatively by auto-grow callers, so no resize handle.
+  textarea:
+    "w-full resize-none rounded-control border border-border-subtle bg-surface-1 px-3 py-2 text-sm leading-relaxed text-text-1 outline-none transition-colors focus:border-accent placeholder:text-text-3 pretty-scrollbar",
+
   kbd: "font-mono text-xs text-text-3 bg-surface-2 border border-border-subtle rounded px-1 py-0.5",
 } as const;
