@@ -7,9 +7,16 @@ import { buildChain } from "@/features/providers/store";
 import { loadDocument, extractPage } from "@/features/pdf/pdf";
 import { pagesToTranslate } from "@/features/import/pageRange";
 import { detectLang } from "@/features/import/languages";
-import { translatePage, type RunOptions } from "./engineA";
+import { planPage, runPagePlan, type PagePlan, type RunOptions } from "./engineA";
 import { getInjectionTerms } from "@/features/glossary/store";
 import { extractAndSaveTerms, noteTermWarning } from "@/features/glossary/extract";
+
+/**
+ * Share of the bar given to extracting and planning the pages. Text extraction
+ * is fast per page but not free over a long PDF, and it all happens before the
+ * first provider call — without its own slice the bar would sit at 0% through it.
+ */
+const PLAN_SHARE = 0.1;
 
 export interface JobOptions {
   providerId: string | null;
@@ -61,22 +68,48 @@ export async function runTranslationJob(docId: string, opts: JobOptions): Promis
     };
 
     let lastWrite = 0;
-    for (let idx = 0; idx < pages.length; idx++) {
+    /** Throttled, because every write re-reads the document (PDF bytes and all). */
+    const report = (progress: number) => {
+      const now = Date.now();
+      if (now - lastWrite < 300) return;
+      lastWrite = now;
+      void db.documents.update(docId, { progress });
+    };
+
+    // Extract and plan every page before translating any of it: the batch is
+    // the only unit that takes real time, and totalling them up front is what
+    // lets the bar move steadily instead of jumping a whole page at a time.
+    const plans: PagePlan[] = [];
+    for (const pageNumber of pages) {
       if (opts.signal?.aborted) {
         await db.documents.update(docId, { status: "ready" });
         return;
       }
-      const docPage = await translatePage(pdf, pages[idx], runOpts, (frac) => {
-        // Sub-page progress so a single slow page doesn't sit at 0%. Throttle writes.
-        const now = Date.now();
-        if (now - lastWrite > 300) {
-          lastWrite = now;
-          db.documents.update(docId, { progress: (idx + frac) / pages.length });
-        }
+      plans.push(await planPage(pdf, pageNumber, runOpts));
+      report((plans.length / pages.length) * PLAN_SHARE);
+    }
+
+    const totalBatches = plans.reduce((n, p) => n + p.batchCount, 0);
+    let doneBatches = 0;
+    let donePages = 0;
+    // A run served entirely from the translation memory has no batches to
+    // count, so fall back to pages rather than dividing by zero.
+    const translated = () =>
+      totalBatches ? doneBatches / totalBatches : donePages / pages.length;
+
+    for (const plan of plans) {
+      if (opts.signal?.aborted) {
+        await db.documents.update(docId, { status: "ready" });
+        return;
+      }
+      const docPage = await runPagePlan(plan, runOpts, () => {
+        doneBatches++;
+        report(PLAN_SHARE + (1 - PLAN_SHARE) * translated());
       });
       await db.pages.put(docPage);
+      donePages++;
       await db.documents.update(docId, {
-        progress: (idx + 1) / pages.length,
+        progress: PLAN_SHARE + (1 - PLAN_SHARE) * translated(),
         updatedAt: Date.now(),
       });
     }

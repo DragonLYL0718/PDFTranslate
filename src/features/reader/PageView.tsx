@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { renderPage, renderTextLayer } from "@/features/pdf/pdf";
+import { getPdfHighlights, renderPage, renderTextLayer, type PdfHighlight } from "@/features/pdf/pdf";
 import type { Annotation, Bbox, DocPage, TextBlock } from "@/types";
 
 interface Props {
@@ -12,20 +12,50 @@ interface Props {
   translated: boolean;
   /** Highlights to paint under the text, in PDF points. */
   annotations?: Annotation[];
+  /**
+   * Repaint this document's highlights as a blended layer instead of letting
+   * them render into the canvas. Set on the translated panes, where a highlight
+   * would otherwise sit opaquely on top of text it no longer lines up with.
+   * It is a separate document because engine B renders BabelDOC's output, whose
+   * highlights are stripped on the way in — the source still has them.
+   */
+  highlightsFrom?: PDFDocumentProxy;
   /** Passages a citation just jumped to, breathing briefly so the eye finds them. */
   cited?: Bbox[];
 }
 
 /** One rendered page: original canvas, optionally with translated text overlaid at original positions. */
-export function PageView({ pdf, pageNumber, page, scale, translated, annotations, cited }: Props) {
+export function PageView({
+  pdf,
+  pageNumber,
+  page,
+  scale,
+  translated,
+  annotations,
+  highlightsFrom,
+  cited,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
+  const [pdfHighlights, setPdfHighlights] = useState<PdfHighlight[]>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    renderPage(pdf, pageNumber, scale, canvas);
-  }, [pdf, pageNumber, scale]);
+    renderPage(pdf, pageNumber, scale, canvas, !!highlightsFrom);
+  }, [pdf, pageNumber, scale, highlightsFrom]);
+
+  // In points, so zooming reuses them instead of re-reading the page.
+  useEffect(() => {
+    if (!highlightsFrom) return;
+    let alive = true;
+    getPdfHighlights(highlightsFrom, pageNumber)
+      .then((h) => alive && setPdfHighlights(h))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [highlightsFrom, pageNumber]);
 
   // A selectable text layer, but only where it is actually reachable: engine A's
   // translated pane covers the canvas with opaque overlay divs, and those are
@@ -42,7 +72,8 @@ export function PageView({ pdf, pageNumber, page, scale, translated, annotations
 
   return (
     <div
-      className="relative bg-white shadow-card"
+      // `isolate` keeps the highlights' multiply blend inside this page.
+      className="relative isolate bg-white shadow-card"
       style={{ lineHeight: 0 }}
       data-page={pageNumber}
       data-side={translated ? "target" : "source"}
@@ -86,6 +117,27 @@ export function PageView({ pdf, pageNumber, page, scale, translated, annotations
             width: box.w * scale + 6,
             height: box.h * scale + 4,
             zIndex: 3,
+          }}
+        />
+      ))}
+
+      {/* Over the translation (z-index 2) rather than under it, because the
+          overlay blocks are opaque — a highlight behind them would vanish.
+          Multiply keeps the glyphs legible: it darkens white paper to the
+          highlight colour and leaves black text black, the way a real
+          highlighter behaves. */}
+      {pdfHighlights.map((h, i) => (
+        <div
+          key={i}
+          className="pointer-events-none absolute rounded-sm"
+          style={{
+            left: h.bbox.x * scale,
+            top: h.bbox.y * scale,
+            width: h.bbox.w * scale,
+            height: h.bbox.h * scale,
+            background: h.color,
+            mixBlendMode: "multiply",
+            zIndex: 4,
           }}
         />
       ))}

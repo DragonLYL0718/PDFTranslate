@@ -4,6 +4,7 @@ import type { LangCode, Provider } from "@/types";
 import { listProviders } from "@/features/providers/store";
 import { openaiBase } from "@/features/providers/util";
 import { formatPageRange } from "@/features/import/pageRange";
+import { getPdfHighlights, loadDocument } from "@/features/pdf/pdf";
 import { parseCsv, resolveTermTarget, upsertAutoTerms } from "@/features/glossary/store";
 import { filterTermPairs, noteTermWarning } from "@/features/glossary/extract";
 
@@ -182,6 +183,36 @@ async function importBabelDocGlossary(
   }
 }
 
+/** How often to ask the backend where a running translation has got to. */
+const PROGRESS_POLL_MS = 1500;
+
+/**
+ * Mirror the backend's progress onto the document while the translate request
+ * is in flight. BabelDOC runs as one long POST, so without this the bar sits at
+ * 0% until the finished PDF lands and then jumps straight to 100%. Backends
+ * predating the "progress" feature have nothing to report, so aren't polled.
+ * Returns a function that stops the polling.
+ */
+function pollProgress(jobId: string, docId: string): () => void {
+  let last = 0;
+  const timer = setInterval(async () => {
+    // Checked per tick, not once: the startup probe may still be in flight.
+    if (!getEngineBStatus().features?.includes("progress")) return;
+    try {
+      const res = await fetch(`${_configUrl.replace(/\/$/, "")}/api/progress/${jobId}`);
+      if (!res.ok) return; // 404 until the upload finishes and the run registers
+      const { percent } = (await res.json()) as { percent: number };
+      // Monotonic, and never a full 100% — the run isn't done until the PDF is
+      // stored, which is this function's caller's job.
+      last = Math.min(0.99, Math.max(last, percent / 100));
+      await db.documents.update(docId, { progress: last });
+    } catch {
+      // A missed poll is not worth failing the translation over.
+    }
+  }, PROGRESS_POLL_MS);
+  return () => clearInterval(timer);
+}
+
 export interface EngineBOptions {
   source: LangCode;
   target: LangCode;
@@ -196,6 +227,26 @@ export interface EngineBOptions {
  * PDF plus the OpenAI-compatible provider config, then stores the returned
  * translated PDF bytes on the document for the reader to render.
  */
+/**
+ * Whether the document carries highlights flattened into the page content.
+ * BabelDOC would re-emit those opaque fills over the translated text, so the
+ * backend is asked to drop them — but only for documents that have them, since
+ * the same BabelDOC option also removes decorative rules from paragraphs.
+ * Samples the first few pages: a highlighted document has them early enough,
+ * and parsing every page of a long PDF before the upload starts is not worth it.
+ */
+async function hasFlattenedHighlights(data: ArrayBuffer): Promise<boolean> {
+  try {
+    const pdf = await loadDocument(data);
+    for (let n = 1; n <= Math.min(pdf.numPages, 8); n++) {
+      if ((await getPdfHighlights(pdf, n)).length) return true;
+    }
+  } catch {
+    // Not worth failing a translation over; the highlights just stay as they were.
+  }
+  return false;
+}
+
 export async function translateWithEngineB(docId: string, opts: EngineBOptions): Promise<void> {
   const { source, target, providerId, signal } = opts;
   const doc = await db.documents.get(docId);
@@ -217,11 +268,14 @@ export async function translateWithEngineB(docId: string, opts: EngineBOptions):
     warning: undefined,
   });
 
+  const jobId = crypto.randomUUID();
+  const stopPolling = pollProgress(jobId, docId);
   try {
     const form = new FormData();
     form.append("file", new Blob([doc.data], { type: "application/pdf" }), doc.name);
     form.append("source", source);
     form.append("target", target);
+    form.append("job_id", jobId);
     // Honour the page selection made at import time — without this BabelDOC
     // translates the whole document regardless of what the user picked.
     if (doc.selectedPages?.length) form.append("pages", formatPageRange(doc.selectedPages));
@@ -230,6 +284,7 @@ export async function translateWithEngineB(docId: string, opts: EngineBOptions):
     form.append("openai_base_url", openaiBase(provider.baseURL));
     form.append("openai_api_key", provider.apiKey);
     form.append("openai_model", provider.model);
+    if (await hasFlattenedHighlights(doc.data)) form.append("strip_highlights", "on");
 
     const res = await fetch(`${_configUrl.replace(/\/$/, "")}/api/translate`, {
       method: "POST",
@@ -262,5 +317,7 @@ export async function translateWithEngineB(docId: string, opts: EngineBOptions):
       error: e instanceof Error ? e.message : String(e),
     });
     throw e;
+  } finally {
+    stopPolling();
   }
 }

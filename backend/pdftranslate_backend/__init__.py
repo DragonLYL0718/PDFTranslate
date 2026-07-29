@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import os
 import re
 import shutil
@@ -107,7 +108,8 @@ async def health():
         # Lets the app tell "this backend predates per-run reports, restart it"
         # apart from "this run genuinely produced no terms". "stream" means
         # /proxy pipes the upstream body through, so relayed SSE arrives live.
-        "features": ["report", "stream"],
+        # "progress" means /api/progress/{job_id} tracks a running translation.
+        "features": ["report", "stream", "progress"],
     }
 
 
@@ -174,6 +176,78 @@ def _translation_report(log: str) -> dict:
     }
 
 
+# -- live progress --------------------------------------------------------
+# BabelDOC reports progress only by drawing a `rich` bar, and rich paints
+# nothing at all while it believes it is writing to a pipe — FORCE_COLOR on the
+# subprocess is what makes the frames appear, and this parses them back out.
+# The client picks the job id, so it can start polling while it is still
+# uploading, before this request has begun.
+_PROGRESS: OrderedDict[str, float] = OrderedDict()
+_PROGRESS_LIMIT = 32
+
+# Colour/cursor codes, and the OSC hyperlinks rich wraps the log's file column
+# in once it believes it is on a terminal — those would otherwise end up in the
+# failure text we show the user.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+# The task rich draws for the run as a whole: description "translate" and a
+# MofNCompleteColumn out of 100 — "translate ━━━╸… 42/100 0:01:23 0:02:00".
+# Per-stage bars are described "Translate Paragraph (1/1)", so the lowercase
+# name only ever matches the overall one.
+_OVERALL_RE = re.compile(r"^translate\s.*?(\d{1,3})/100(?:\s|$)")
+# Glyphs BarColumn draws with. Frames arrive ~10 times a second, so they are
+# recognised and dropped rather than piling up in the log we keep.
+_BAR_CHARS = ("━", "╸", "╺")
+
+
+def _set_progress(job_id: str, percent: float) -> None:
+    _PROGRESS[job_id] = percent
+    _PROGRESS.move_to_end(job_id)
+    while len(_PROGRESS) > _PROGRESS_LIMIT:
+        _PROGRESS.popitem(last=False)
+
+
+@app.get("/api/progress/{job_id}")
+async def get_progress(job_id: str):
+    """How far a running translation has got, 0-100."""
+    percent = _PROGRESS.get(job_id)
+    if percent is None:
+        return JSONResponse(status_code=404, content={"error": "unknown job"})
+    return {"percent": percent}
+
+
+def _consume_line(line: str, job_id: str, log: list[str]) -> None:
+    """Route one line of BabelDOC output: progress frame, or something to keep."""
+    clean = _ANSI_RE.sub("", line)
+    if not any(c in clean for c in _BAR_CHARS):
+        log.append(clean)
+        return
+    m = _OVERALL_RE.match(clean.strip())
+    if m and job_id:
+        _set_progress(job_id, min(100.0, float(m[1])))
+
+
+async def _drain(stream: asyncio.StreamReader, job_id: str, log: list[str]) -> None:
+    """
+    Read one of BabelDOC's output streams to the end, splitting on carriage
+    returns as well as newlines — rich repaints a frame by returning to the
+    start of the line rather than ending it, so a line-oriented read would sit
+    on a whole frame until the next one arrived.
+    """
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    buf = ""
+    while True:
+        chunk = await stream.read(4096)
+        buf += decoder.decode(chunk, final=not chunk)
+        lines = re.split(r"[\r\n]", buf)
+        buf = lines.pop()
+        for line in lines:
+            _consume_line(line, job_id, log)
+        if not chunk:
+            break
+    if buf:
+        _consume_line(buf, job_id, log)
+
+
 # -- translate endpoint ---------------------------------------------------
 @app.post("/api/translate")
 async def translate(
@@ -189,10 +263,13 @@ async def translate(
     # "off" turns off BabelDOC's own term extraction (it is on by default, and
     # costs extra model calls). Anything else keeps it on and saves the result.
     auto_glossary: str = Form(""),
+    # Client-chosen id this run reports its progress under, for /api/progress.
+    job_id: str = Form(""),
     # OpenAI-compatible LLM config — BabelDOC needs a translator to run.
     openai_base_url: str = Form(""),
     openai_api_key: str = Form(""),
     openai_model: str = Form(""),
+    strip_highlights: str = Form(""),
 ):
     """
     Translate a PDF using BabelDOC. Accepts a multipart upload plus the
@@ -243,6 +320,14 @@ async def translate(
             cmd.extend(["--pages", pages.strip()])
         if thinking in ("enabled", "disabled"):
             cmd.extend(["--openai-thinking", thinking])
+        # Highlights flattened into the page content are opaque filled rects, and
+        # BabelDOC re-emits them after the translated text, burying it. This drops
+        # decorative fills from paragraph areas (figures/tables stay protected);
+        # the app repaints the highlights over the result instead. Only sent when
+        # the client actually found flattened highlights, so documents that rely
+        # on rules inside paragraphs keep them.
+        if strip_highlights == "on":
+            cmd.append("--remove-non-formula-lines")
         # BabelDOC extracts a glossary during translation to keep terminology
         # consistent; --save-auto-extracted-glossary is what writes it out so we
         # can hand it back to the app.
@@ -258,11 +343,28 @@ async def translate(
             # BabelDOC logs through `rich`, which hard-wraps to the terminal
             # width — 80 by default off a TTY, which splits messages mid-phrase
             # and makes them unmatchable (and unreadable when we echo them back).
-            env={**os.environ, "COLUMNS": "200"},
+            # FORCE_COLOR makes rich treat the pipe as a terminal, which is the
+            # only way it paints its progress bar while the run is going; the
+            # escape codes it also emits are stripped as we read.
+            env={**os.environ, "COLUMNS": "200", "FORCE_COLOR": "1"},
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
+        if job_id:
+            _set_progress(job_id, 0.0)
         # rich writes to stdout, so translation errors are NOT on stderr.
-        log = (stdout + stderr).decode(errors="replace")
+        lines: list[str] = []
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    _drain(proc.stdout, job_id, lines),
+                    _drain(proc.stderr, job_id, lines),
+                    proc.wait(),
+                ),
+                timeout=TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise
+        log = "\n".join(lines)
 
         if proc.returncode != 0:
             return JSONResponse(

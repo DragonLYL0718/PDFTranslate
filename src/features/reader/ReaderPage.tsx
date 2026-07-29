@@ -533,7 +533,13 @@ export function ReaderPage() {
                   {showTarget && (
                     doc.engine === "babeldoc" ? (
                       transPdf && n <= transPdf.numPages ? (
-                        <PageView pdf={transPdf} pageNumber={n} scale={effectiveScale} translated={false} />
+                        <PageView
+                          pdf={transPdf}
+                          pageNumber={n}
+                          scale={effectiveScale}
+                          translated={false}
+                          highlightsFrom={pdf}
+                        />
                       ) : (
                         <div className="grid min-h-40 w-64 place-items-center rounded-card border border-border-subtle text-sm text-text-3">
                           {doc.status === "translating"
@@ -552,6 +558,7 @@ export function ReaderPage() {
                         page={pagesByNum.get(n)}
                         scale={effectiveScale}
                         translated
+                        highlightsFrom={pdf}
                         cited={cited?.page === n ? cited.boxes : undefined}
                       />
                     )
