@@ -16,12 +16,44 @@ An AI-powered **PDF translator**, local-first and browser-only.
 
 ## Usage
 
-### Option A: Browser engine only (zero configuration)
+### Option A: Desktop app (macOS / Windows) — recommended
+
+Download the installer for your platform from [Releases](https://github.com/DragonLYL0718/PDFTranslate/releases):
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `PDFTranslate_*_aarch64.dmg` |
+| macOS (Intel) | `PDFTranslate_*_x64.dmg` |
+| Windows | `PDFTranslate_*-setup.exe` |
+
+The desktop app needs **no proxy script**: its requests go out through the native
+HTTP client, so it reaches AI providers that a browser refuses by CORS. The
+high-fidelity engine installs itself from inside the app — Settings → the import
+dialog → **Install the high-fidelity engine**, no terminal involved.
+
+> **These builds are not signed.** Code-signing certificates are paid, and this
+> project has none, so both systems will warn you. The builds are produced by the
+> public workflow in this repo and every release lists SHA-256 checksums.
+>
+> **macOS** says *"PDFTranslate is damaged and can't be opened"*. Fix it once:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/PDFTranslate.app
+> ```
+> Or without a terminal: double-click it, then go to **System Settings → Privacy
+> & Security**, scroll down and click **Open Anyway**.
+>
+> **Windows** shows *"Windows protected your PC"*. Click **More info → Run anyway**.
+>
+> Updates installed from inside the app skip all of this — only the first install
+> needs it.
+
+### Option B: Browser only (zero installation)
 - Visit the site hosted on GitHub Pages
 - Uses the default browser heuristic engine
 - Runs entirely in the browser, nothing to install
+- CORS-blocked providers need the local proxy helper (the app prompts you)
 
-### Option B: Add the local BabelDOC backend (high fidelity)
+### Option C: Browser + local BabelDOC backend (high fidelity, manual)
 
 Install with [uv](https://docs.astral.sh/uv/), no need to clone the repo:
 
@@ -47,15 +79,48 @@ See [`backend/INSTALL.md`](backend/INSTALL.md) for details.
 - **Engine A (browser heuristic)**: PDF.js + an AI LLM, deployed on GitHub Pages, no setup required.
 - **Engine B (high-fidelity BabelDOC)**: an optional local Python backend (AGPL-3.0) that gives the best layout preservation.
 
+One `src/` builds all three targets. Everything that genuinely differs between
+the browser and the desktop shell — reaching a provider past CORS, writing a
+file, opening a link, locating the backend — sits behind `src/platform/`.
+
 ## Development
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
-npm run build      # output in dist/
+npm run dev            # web, http://localhost:5173
+npm run build          # web bundle → dist/
+
+npm run desktop        # desktop app, dev mode
+npm run desktop:build  # installers → src-tauri/target/release/bundle/
 ```
 
-Pushing to `main` triggers a GitHub Actions build that publishes to Pages.
+The desktop build needs [Rust](https://rustup.rs). `npm run desktop` first runs
+`prep:desktop`, which vendors the `uv` sidecar (checksum-verified against the
+release's own `.sha256`) and stages `backend/` as a bundled resource.
+
+Pushing to `main` publishes the web app to Pages. Pushing a `v*` tag builds the
+desktop installers and opens a **draft** release.
+
+### Releasing
+
+The updater signs its manifest with a key that is independent of OS code
+signing (and free). It is already configured; the private key lives outside this
+repo at `~/.pdftranslate/updater.key`. Add it to the repo's GitHub secrets once:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.pdftranslate/updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""
+```
+
+Then tag a release:
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+> **Back up `~/.pdftranslate/updater.key` somewhere outside CI.** Losing it means
+> published apps can no longer verify updates, and every user has to reinstall
+> by hand — including the Gatekeeper dance.
 
 ## Open Source Acknowledgements
 
@@ -76,4 +141,6 @@ This project is built on top of these open source projects:
 
 ## License
 
-The frontend code is MIT licensed. The optional `backend/` component wraps BabelDOC and is licensed under **AGPL-3.0**, invoked as a separate process over a local HTTP API.
+The frontend code is MIT licensed. The optional `backend/` component wraps BabelDOC and is licensed under **AGPL-3.0** ([`backend/LICENSE`](backend/LICENSE)), invoked as a separate process over a local HTTP API.
+
+The desktop app additionally ships the `uv` binary and the backend's source. See [THIRD-PARTY.md](THIRD-PARTY.md) for what is bundled, what is downloaded onto the user's machine, and under which terms.

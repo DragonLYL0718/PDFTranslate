@@ -8,7 +8,7 @@
 
 import type { Provider } from "@/types";
 import { openaiBase, reasoningBudget, reasoningEnabled } from "./util";
-import { canStream, smartFetch } from "./net";
+import { anySignal, canStream, smartFetch } from "./net";
 import { isEventStream, sseEvents } from "./sse";
 
 export interface LlmMessage {
@@ -164,7 +164,7 @@ export async function llmCall(provider: Provider, opts: LlmCallOptions): Promise
   };
   const signal = stall
     ? opts.signal
-      ? AbortSignal.any([opts.signal, stall.signal])
+      ? anySignal([opts.signal, stall.signal])
       : stall.signal
     : opts.signal;
 

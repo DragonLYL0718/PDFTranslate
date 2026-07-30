@@ -5,6 +5,7 @@ import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { styles } from "@/lib/styles";
 import { Modal } from "@/components/Modal";
+import { downloadBlob } from "@/lib/download";
 import { db } from "@/db/db";
 import { useSettings } from "@/store/useSettings";
 import {
@@ -55,12 +56,7 @@ export function GlossaryPage() {
 
   function exportCsv() {
     if (!current || !terms) return;
-    const blob = new Blob([termsToCsv(terms)], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${glossaryName(current)}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadBlob(new TextEncoder().encode(termsToCsv(terms)), `${glossaryName(current)}.csv`, "text/csv");
   }
 
   return (

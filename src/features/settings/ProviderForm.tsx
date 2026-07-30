@@ -9,6 +9,7 @@ import { fetchModels } from "@/features/providers/models";
 import { providerLabel, upsertProvider } from "@/features/providers/store";
 import { isNetworkError } from "@/features/providers/net";
 import { useProxyDialog } from "@/store/proxyDialog";
+import { isDesktop } from "@/platform";
 import { useSettings } from "@/store/useSettings";
 import type { Provider, ReasoningLevel } from "@/types";
 
@@ -65,7 +66,8 @@ export function ProviderForm({ initial, isNew, onClose }: Props) {
     } catch (e) {
       setModelMsg(e instanceof Error ? t("provider.fetchFailedHint", { error: e.message }) : t("provider.fetchFailed"));
       // Likely CORS (network-level failure) and proxy not on -> offer the local proxy.
-      if (isNetworkError(e) && !settings.proxyEnabled) {
+      // Never in the shell: there the failure is a real network error.
+      if (!isDesktop && isNetworkError(e) && !settings.proxyEnabled) {
         showProxy(t("provider.fetchCorsPrompt"));
       }
     } finally {

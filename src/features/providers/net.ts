@@ -6,6 +6,10 @@
 let proxy = { enabled: false, url: "http://localhost:8788" };
 // The BabelDOC backend doubles as a CORS relay; always a fallback candidate.
 let backendUrl = "http://localhost:8787";
+// Set by the desktop shell (src/platform). Non-null means requests go out
+// through Rust, where the same-origin policy doesn't exist — so the whole relay
+// apparatus below is bypassed rather than deleted, keeping the web build intact.
+let nativeFetch: typeof fetch | null = null;
 
 import { t } from "@/i18n";
 
@@ -34,6 +38,23 @@ export function setRelayBackend(url: string): void {
   relayProbe = null;
 }
 
+/**
+ * Install a fetch that isn't bound by the same-origin policy (the desktop
+ * shell's), so no provider ever needs a local relay. Passing null restores
+ * browser behaviour.
+ */
+export function setNativeFetch(f: typeof fetch | null): void {
+  nativeFetch = f;
+  // Native requests always stream, so probeRelay never has to ask.
+  relayHealth = f ? { streaming: true } : null;
+  relayProbe = null;
+}
+
+/** Plain fetch on the web, CORS-free fetch in the desktop shell. */
+export function netFetch(url: string, init?: RequestInit): Promise<Response> {
+  return (nativeFetch ?? fetch)(url, init);
+}
+
 function headerObject(h: HeadersInit | undefined): Record<string, string> {
   if (!h) return {};
   if (h instanceof Headers) {
@@ -50,10 +71,30 @@ export function isNetworkError(e: unknown): boolean {
   return e instanceof TypeError;
 }
 
+/**
+ * Abort as soon as any of these do.
+ *
+ * Hand-rolled rather than `AbortSignal.any`, which needs Safari 17.4 — i.e.
+ * macOS 14.4. The desktop shell renders in the OS WebView, which the user
+ * cannot upgrade on its own, so relying on it would break every request for
+ * anyone on an older macOS.
+ */
+export function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
+}
+
 /** Combine an optional caller signal with a timeout so requests can't hang forever. */
 export function withTimeout(signal: AbortSignal | null | undefined, ms: number): AbortSignal {
   const timeout = AbortSignal.timeout(ms);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+  return signal ? anySignal([signal, timeout]) : timeout;
 }
 
 function originOf(url: string): string {
@@ -103,6 +144,7 @@ async function relayFetch(url: string, init: RequestInit | undefined, bases: str
  * ProxyUnavailableError so the UI can prompt the user to start the service.
  */
 export async function smartFetch(url: string, init?: RequestInit): Promise<Response> {
+  if (nativeFetch) return nativeFetch(url, init); // no CORS to work around
   const host = originOf(url);
 
   // Explicit proxy, or a host already known to be CORS-blocked: relay directly.
@@ -136,6 +178,7 @@ const PROBE_TTL = 30_000;
 
 /** True when a request to this URL is going through the local relay. */
 export function willRelay(url: string): boolean {
+  if (nativeFetch) return false;
   return proxy.enabled || relayHosts.has(originOf(url));
 }
 

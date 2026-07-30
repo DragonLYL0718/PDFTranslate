@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { Copy, CheckCircle2, XCircle, Loader2, Download, ExternalLink } from "lucide-react";
 import { Modal } from "@/components/Modal";
 import { t } from "@/i18n";
@@ -8,22 +8,37 @@ import { useBabelDocDialog } from "@/store/babeldocDialog";
 import { pingEngineB, resetEngineBProbe } from "@/features/engine/engineB";
 import { patchSettings } from "@/db/db";
 import { useSettings } from "@/store/useSettings";
+import { isDesktop } from "@/platform";
+
+// Behind the build-time flag, not just lazy: `lazy(() => import(…))` on its own
+// still emits the chunk, @tauri-apps runtime and all, into the web bundle. The
+// folded ternary is what makes the import unreachable so Rollup drops it.
+const InstallPanel = isDesktop
+  ? lazy(() => import("./BabelDocInstallPanel").then((m) => ({ default: m.BabelDocInstallPanel })))
+  : undefined;
 
 const BASE = import.meta.env.BASE_URL; // e.g. "/PDFTranslate/" or "/"
 const SCRIPT_URL = new URL(`${BASE}install-babeldoc.mjs`, location.origin).href;
 /** The page URL the user is currently on — what they return to after setup. */
 const APP_URL = `${location.origin}${BASE}`.replace(/\/+$/, "/");
 
+/** This repo, as recorded in backend/pyproject.toml. */
+const DEFAULT_REPO_URL = "https://github.com/DragonLYL0718/PDFTranslate";
+
 /**
- * Derive the GitHub repo URL from a `*.github.io` Pages host.
- * `lylrayleigh.github.io/PDFTranslate/` → `https://github.com/lylrayleigh/PDFTranslate`.
- * Falls back to a placeholder off github.io (e.g. local dev).
+ * The repo the backend package is installed from. VITE_REPO_URL wins so a fork
+ * can point the command at itself; failing that a `*.github.io` Pages host
+ * still names the fork in its own hostname. The default matters because the
+ * hostname carries no such hint on a custom domain, in the desktop shell, or in
+ * local dev — where this used to emit an unusable placeholder.
  */
 function deriveGitUrl(): string {
+  const configured = import.meta.env.VITE_REPO_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
   const m = location.hostname.match(/^([^.]+)\.github\.io$/);
   const repo = BASE.replace(/\//g, "");
   if (m && repo) return `https://github.com/${m[1]}/${repo}`;
-  return "https://github.com/<your-username>/<repo>";
+  return DEFAULT_REPO_URL;
 }
 const GIT_URL = deriveGitUrl();
 /** pip/uv requirement spec that installs the backend package from the repo's `backend/` subdir. */
@@ -43,6 +58,23 @@ export function BabelDocSetupDialog() {
   const [source, setSource] = useState<string | null>(null);
 
   if (!open) return null;
+
+  // The shell installs and runs the backend itself, so none of the terminal
+  // instructions below apply there.
+  if (isDesktop && InstallPanel) {
+    return (
+      <Modal
+        open={open}
+        onClose={hide}
+        title={t("babeldoc.title")}
+        footer={<button className={cn(styles.button, styles.press)} onClick={hide}>{t("prune.done")}</button>}
+      >
+        <Suspense fallback={<p className={styles.muted}>{t("reader.loading")}</p>}>
+          <InstallPanel />
+        </Suspense>
+      </Modal>
+    );
+  }
 
   async function copy(text: string, key: string) {
     try { await navigator.clipboard.writeText(text); setCopied(key); } catch {}

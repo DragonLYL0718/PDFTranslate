@@ -11,12 +11,17 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import codecs
+import contextlib
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
 from collections import OrderedDict
@@ -34,7 +39,7 @@ STATIC_DIR = HERE / "dist"  # prebuilt SPA
 if not STATIC_DIR.is_dir():
     # fallback: look at the repo root
     STATIC_DIR = HERE.parent / "dist"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 # BabelDOC tuning. Overridable because the right values depend on the user's
 # provider: a low rate limit needs a lower QPS (BabelDOC drops any paragraph
@@ -46,6 +51,17 @@ TIMEOUT = int(os.environ.get("BABELDOC_TIMEOUT", "1800"))
 # to the whole exchange, so a stream that keeps producing tokens never trips it
 # — this only bounds silence (e.g. a long first token behind extended thinking).
 PROXY_TIMEOUT = int(os.environ.get("PROXY_TIMEOUT", "300"))
+
+# Where to find BabelDOC. The desktop shell installs it into its own private
+# directory and passes the full path, which is more robust than hoping the
+# spawned process inherited the right PATH — on Windows especially.
+BABELDOC_BIN = os.environ.get("BABELDOC_BIN", "babeldoc")
+
+# Spawning a console app from a GUI process pops a console window on Windows.
+# Every subprocess here is a background detail the user should never see.
+_NO_WINDOW: dict = (
+    {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+)
 
 # -- app ------------------------------------------------------------------
 app = FastAPI(
@@ -60,11 +76,26 @@ app = FastAPI(
 #
 # NOTE: Starlette matches `allow_origins` entries as exact strings (globs like
 # "http://localhost:*" never match), so port wildcards need the regex form.
+def _extra_origins() -> str:
+    """
+    Regex alternatives for PDFT_EXTRA_ORIGINS (comma-separated). The desktop
+    shell fills this with the exact origin its webview ended up on, so the
+    allowlist doesn't have to guess at Tauri's scheme conventions.
+    """
+    raw = os.environ.get("PDFT_EXTRA_ORIGINS", "")
+    return "".join("|" + re.escape(o.strip()) for o in raw.split(",") if o.strip())
+
+
 ALLOWED_ORIGIN_REGEX = (
     r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
     r"|https://[\w-]+\.github\.io"
     r"|https://pdftranslate\.rayleigh-lin\.top"
-)
+    # The desktop shell's own origin: tauri://localhost on macOS and Linux,
+    # http://tauri.localhost on Windows. Neither matches the loopback rule
+    # above, whose host part has to be exactly localhost or 127.0.0.1.
+    r"|tauri://localhost"
+    r"|http://tauri\.localhost"
+) + _extra_origins()
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX)
 
 app.add_middleware(
@@ -99,12 +130,13 @@ def _origin_allowed(origin: str | None) -> bool:
 
 
 @app.get("/api/health")
-async def health():
+async def health(refresh: int = 0):
     return {
         "ok": True,
         "name": "pdftranslate-backend",
         "version": VERSION,
-        "babeldoc": _babeldoc_version(),
+        # ?refresh=1 re-runs the probe, for right after an install.
+        "babeldoc": _babeldoc_version(refresh=bool(refresh)),
         # Lets the app tell "this backend predates per-run reports, restart it"
         # apart from "this run genuinely produced no terms". "stream" means
         # /proxy pipes the upstream body through, so relayed SSE arrives live.
@@ -113,15 +145,27 @@ async def health():
     }
 
 
-def _babeldoc_version() -> str | None:
+# Spawning babeldoc costs ~a second, and /api/health is polled on mount, on
+# every import dialog, on every "test connection" and by the desktop shell while
+# it waits for startup — so the answer is worked out once and kept.
+_BABELDOC_VERSION: str | None = None
+_BABELDOC_CHECKED = False
+
+
+def _babeldoc_version(refresh: bool = False) -> str | None:
+    global _BABELDOC_VERSION, _BABELDOC_CHECKED
+    if _BABELDOC_CHECKED and not refresh:
+        return _BABELDOC_VERSION
     try:
         r = subprocess.run(
-            ["babeldoc", "--version"],
-            capture_output=True, text=True, timeout=10,
+            [BABELDOC_BIN, "--version"],
+            capture_output=True, text=True, timeout=10, **_NO_WINDOW,
         )
-        return r.stdout.strip() or None
+        _BABELDOC_VERSION = r.stdout.strip() or None
     except Exception:
-        return None
+        _BABELDOC_VERSION = None
+    _BABELDOC_CHECKED = True
+    return _BABELDOC_VERSION
 
 
 # A paragraph the per-paragraph translator gave up on. This is the *last*
@@ -197,6 +241,20 @@ _OVERALL_RE = re.compile(r"^translate\s.*?(\d{1,3})/100(?:\s|$)")
 # Glyphs BarColumn draws with. Frames arrive ~10 times a second, so they are
 # recognised and dropped rather than piling up in the log we keep.
 _BAR_CHARS = ("━", "╸", "╺")
+
+
+# The babeldoc run in flight, if any. Tracked so shutdown can take it down:
+# it is a child of this process, and on Windows nothing kills it for us.
+_CURRENT_PROC: asyncio.subprocess.Process | None = None
+
+
+def _terminate_child() -> None:
+    """Stop the running babeldoc, if there is one. Safe to call repeatedly."""
+    proc = _CURRENT_PROC
+    if proc is None or proc.returncode is not None:
+        return
+    with contextlib.suppress(Exception):
+        proc.kill()
 
 
 def _set_progress(job_id: str, percent: float) -> None:
@@ -277,7 +335,9 @@ async def translate(
 
     Returns the translated (monolingual) PDF bytes on success.
     """
-    if not _babeldoc_version():
+    # A cached "missing" can be stale — the user may have just installed it —
+    # so re-check before refusing. A cached hit never goes stale that way.
+    if not _babeldoc_version(refresh=_BABELDOC_VERSION is None):
         return JSONResponse(
             status_code=501,
             content={"error": "BabelDOC 未安装。请运行：uv tool install --python 3.12 BabelDOC"},
@@ -301,7 +361,7 @@ async def translate(
         # Build BabelDOC command. NOTE: input goes through --files, languages use
         # --lang-in/--lang-out, and an OpenAI translator must be supplied.
         cmd = [
-            "babeldoc",
+            BABELDOC_BIN,
             "--files", str(in_path),
             "--output", str(out_dir),
             "--lang-out", target,
@@ -347,7 +407,10 @@ async def translate(
             # only way it paints its progress bar while the run is going; the
             # escape codes it also emits are stripped as we read.
             env={**os.environ, "COLUMNS": "200", "FORCE_COLOR": "1"},
+            **_NO_WINDOW,
         )
+        global _CURRENT_PROC
+        _CURRENT_PROC = proc
         if job_id:
             _set_progress(job_id, 0.0)
         # rich writes to stdout, so translation errors are NOT on stderr.
@@ -398,6 +461,7 @@ async def translate(
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
     finally:
+        _CURRENT_PROC = None
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -441,7 +505,13 @@ async def get_report(rid: str):
 # requests here and we forward them server-side (no CORS limits), returning the
 # upstream response verbatim. This lets one running backend cover both
 # high-fidelity translation and CORS relaying — no separate proxy process.
-@app.post("/proxy")
+# The desktop shell reaches providers through Rust and never calls this, so it
+# switches the route off entirely. Worth doing: /proxy forwards to any URL for
+# any local caller — a missing Origin is read as a non-browser client and
+# allowed — and that is free to give up when nothing needs it.
+PROXY_ENABLED = os.environ.get("PDFT_DISABLE_PROXY") != "1"
+
+
 async def proxy(request: Request):
     # Defence in depth: CORS already stops a disallowed page from *reading* the
     # response, but reject the request outright so we never make the outbound
@@ -508,21 +578,87 @@ async def proxy(request: Request):
     )
 
 
+if PROXY_ENABLED:
+    app.post("/proxy")(proxy)
+
+
 # -- serve SPA (optional) ------------------------------------------------
 # When installed as a tool (uv/pip), there is no bundled frontend — users open
 # the GitHub Pages site instead, which talks to this backend over /api/*.
-_PORT = os.environ.get("PORT", 8787)
 if STATIC_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="spa")
-    print(f"\n✓ 后端 + 前端已就绪：http://127.0.0.1:{_PORT}")
-else:
-    print(f"\n✓ 后端已就绪：http://127.0.0.1:{_PORT}")
-    print(f"   在 PDFTranslate 网页里点「测试连接」即可开始使用高保真引擎。")
+
+
+# -- parent watchdog ------------------------------------------------------
+def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+
+        # PROCESS_QUERY_LIMITED_INFORMATION — succeeds even across integrity
+        # levels, unlike the broader access rights.
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _start_parent_watchdog() -> None:
+    """
+    Exit when whatever launched us does.
+
+    The desktop shell spawns this backend, and BabelDOC in turn runs as its
+    child — so the app being force-quit or crashing would otherwise strand both,
+    holding the port and, mid-translation, a few hundred MB. Polling the parent
+    is the only check that still works when the app dies without a chance to run
+    any cleanup of its own.
+    """
+    raw = os.environ.get("PDFT_PARENT_PID", "")
+    if not raw.isdigit():
+        return
+    parent = int(raw)
+
+    def loop() -> None:
+        while True:
+            time.sleep(5)
+            if _pid_alive(parent):
+                continue
+            # Kill babeldoc explicitly first: it is the expensive one, and on
+            # Windows nothing else would reap it.
+            _terminate_child()
+            if os.name != "nt":
+                # We run in our own process group, so this catches anything the
+                # explicit kill missed.
+                with contextlib.suppress(Exception):
+                    os.killpg(os.getpgid(0), signal.SIGTERM)
+            os._exit(1)
+
+    threading.Thread(target=loop, daemon=True, name="parent-watchdog").start()
 
 
 def main():
     import uvicorn
+
     port = int(os.environ.get("PORT", 8787))
+    # Printed here rather than at import: uvicorn re-imports this module, and on
+    # a Windows console defaulting to cp936 the non-ASCII banner raises inside
+    # the import — killing the backend before uvicorn ever starts, with nothing
+    # useful in the log.
+    with contextlib.suppress(Exception):
+        where = "后端 + 前端" if STATIC_DIR.is_dir() else "后端"
+        print(f"\n✓ {where}已就绪：http://127.0.0.1:{port}")
+    _start_parent_watchdog()
+    # uvicorn shuts down gracefully on SIGTERM, which gets us here — but it
+    # knows nothing about babeldoc, so a translation in flight would otherwise
+    # keep running after the app that asked for it is gone.
+    atexit.register(_terminate_child)
     uvicorn.run("pdftranslate_backend:app", host="127.0.0.1", port=port, reload=False)
 
 

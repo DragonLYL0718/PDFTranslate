@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, Link2, Loader2 } from "lucide-react";
 import { t } from "@/i18n";
@@ -7,6 +7,8 @@ import { styles } from "@/lib/styles";
 import { ImportDialog, type PendingImport } from "@/features/import/ImportDialog";
 import { runTranslationJob, type JobOptions } from "@/features/engine/runJob";
 import { translateWithEngineB, type EngineBOptions } from "@/features/engine/engineB";
+import { netFetch } from "@/features/providers/net";
+import { usePendingFile } from "@/store/pendingFile";
 import { HistoryList } from "./HistoryList";
 
 export function LibraryPage() {
@@ -28,12 +30,23 @@ export function LibraryPage() {
     setPending({ name: file.name, size: file.size, data });
   }
 
+  // Files handed over by the OS ("open with") arrive through this store rather
+  // than the file input; from here on they take exactly the same path.
+  const incoming = usePendingFile((p) => p.file);
+  useEffect(() => {
+    if (!incoming) return;
+    const file = usePendingFile.getState().take();
+    if (file) setPending({ name: file.name, size: file.data.byteLength, data: file.data });
+  }, [incoming]);
+
   async function importUrl() {
     if (!url.trim()) return;
     setUrlBusy(true);
     setError(null);
     try {
-      const res = await fetch(url.trim());
+      // netFetch, not fetch: in the desktop shell this reaches PDFs that the
+      // browser's same-origin policy would refuse outright.
+      const res = await netFetch(url.trim());
       if (!res.ok) throw new Error(t("library.errDownload", { status: res.status }));
       const data = await res.arrayBuffer();
       const name = decodeURIComponent(url.split("/").pop()?.split("?")[0] || "document.pdf");

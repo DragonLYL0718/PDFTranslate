@@ -1,0 +1,45 @@
+[package]
+name = "pdftranslate"
+version = "0.1.0"
+description = "AI PDF translator with layout preservation"
+authors = ["Yilong Lin"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+# The desktop binary is a thin wrapper around this; the crate type list is what
+# lets the same code also build for mobile later.
+name = "pdftranslate_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Rust-side HTTP: the whole reason the shell needs no CORS relay.
+tauri-plugin-http = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+# Runs the bundled `uv` sidecar, streaming its output back for the progress UI.
+tauri-plugin-shell = "2"
+# Updates are how a user escapes the unsigned-app ritual: the updater replaces
+# the bundle without setting a quarantine attribute, so only the very first
+# install needs the Gatekeeper dance. Plain dependencies, not `cfg(desktop)` —
+# that cfg is set by tauri-build at compile time and Cargo, which resolves
+# dependencies before then, would silently drop both plugins.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+# Mandatory alongside the .pdf file association: Windows "Open with" starts a
+# fresh process by default, and two of them racing the same origin-scoped
+# IndexedDB is a corruption risk.
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+# Only for SIGTERM: std's Child::kill sends SIGKILL, which would skip the
+# backend's cleanup and strand a running babeldoc.
+libc = "0.2"

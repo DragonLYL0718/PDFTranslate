@@ -41,5 +41,10 @@ pdftranslate-backend = "pdftranslate_backend:main"
 path = "pdftranslate_backend/__init__.py"
 pattern = 'VERSION = "(?P<version>[^"]+)"'
 
+# Explicit, because a working tree can hold a `dist/` copy of the built SPA and
+# other local build output that hatchling's defaults would otherwise sweep in.
+[tool.hatch.build.targets.wheel]
+packages = ["pdftranslate_backend"]
+
 [tool.uv]
 dev-dependencies = []

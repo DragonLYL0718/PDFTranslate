@@ -9,6 +9,7 @@ import { useSettings } from "@/store/useSettings";
 import { deleteProvider, listProviders, makeProvider, nextOrder, providerLabel, updateProvider } from "@/features/providers/store";
 import { PROVIDER_PRESETS } from "@/features/providers/presets";
 import { useProxyDialog } from "@/store/proxyDialog";
+import { isDesktop } from "@/platform";
 import { clearMemory, memoryCount } from "@/features/memory/tm";
 import { LanguageSection } from "./LanguageSection";
 import { ProviderForm } from "./ProviderForm";
@@ -225,20 +226,24 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className={styles.sectionHeading}>{t("settings.proxy.title")}</h2>
-        <div className={cn(styles.card, "flex items-center justify-between p-4")}>
-          <div>
-            <div className="font-medium">
-              {settings.proxyEnabled ? t("settings.proxy.enabled") : t("settings.proxy.disabled")}
+      {/* The shell's requests go out through Rust, so there is no CORS to relay
+          around and nothing here for the user to configure. */}
+      {!isDesktop && (
+        <section className="flex flex-col gap-3">
+          <h2 className={styles.sectionHeading}>{t("settings.proxy.title")}</h2>
+          <div className={cn(styles.card, "flex items-center justify-between p-4")}>
+            <div>
+              <div className="font-medium">
+                {settings.proxyEnabled ? t("settings.proxy.enabled") : t("settings.proxy.disabled")}
+              </div>
+              <p className={styles.muted}>{t("settings.proxy.desc")}</p>
             </div>
-            <p className={styles.muted}>{t("settings.proxy.desc")}</p>
+            <button className={cn(styles.buttonGhost, styles.press)} onClick={() => showProxy()}>
+              {t("settings.proxy.button")}
+            </button>
           </div>
-          <button className={cn(styles.buttonGhost, styles.press)} onClick={() => showProxy()}>
-            {t("settings.proxy.button")}
-          </button>
-        </div>
-      </section>
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className={styles.sectionHeading}>{t("settings.privacy.title")}</h2>

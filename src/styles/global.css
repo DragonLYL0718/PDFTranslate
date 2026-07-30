@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+@import "./fonts.css";
 @import "./text-layer.css";
 
 /* Class-based dark mode (mirrors rayleigh-lin.top) */

@@ -3,6 +3,7 @@ import { t } from "@/i18n";
 import type { LangCode, Provider } from "@/types";
 import { ProxyUnavailableError } from "@/features/providers/net";
 import { useProxyDialog } from "@/store/proxyDialog";
+import { isDesktop } from "@/platform";
 import { buildChain } from "@/features/providers/store";
 import { loadDocument, extractPage } from "@/features/pdf/pdf";
 import { pagesToTranslate } from "@/features/import/pageRange";
@@ -159,6 +160,7 @@ export async function extractTerms(
  * causes so the user can start the service instead of just seeing an error.
  */
 function maybePromptRelay(e: unknown): void {
+  if (isDesktop) return; // native HTTP needs no relay, so the dialog is nonsense there
   const isTimeout = e instanceof DOMException && e.name === "TimeoutError";
   if (!(e instanceof ProxyUnavailableError) && !isTimeout) return;
   useProxyDialog.getState().show(

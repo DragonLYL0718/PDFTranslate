@@ -1,11 +1,19 @@
 # --- Node / frontend ---
 node_modules
 dist
+dist-desktop
 dist-ssr
 *.local
 .vite
 npm-debug.log*
 yarn-error.log*
+
+# --- Tauri desktop shell ---
+src-tauri/target/
+src-tauri/gen/
+# Vendored by scripts/fetch-uv.mjs and scripts/stage-backend.mjs at build time.
+src-tauri/binaries/
+src-tauri/resources/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
@@ -25,6 +33,8 @@ build/
 .env
 .env.*
 !.env.example
+# Not a secret: selects the desktop build target, and the build breaks without it.
+!.env.desktop
 
 # --- Local test artifacts (sample PDFs dropped in the repo root) ---
 /*.pdf
