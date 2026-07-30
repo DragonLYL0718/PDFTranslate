@@ -102,16 +102,19 @@ jobs:
         run: |
           mkdir -p assets && cd assets
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*' || true
-          # latest.json carries its own signatures; checksums are for the installers.
-          rm -f latest.json
+          # Only the files a human downloads. latest.json and the .sig files are
+          # the updater's business and it verifies them itself.
+          rm -f latest.json *.sig
           [ -n "$(ls -A)" ] || { echo "no assets to checksum"; exit 0; }
+          # Written outside this directory, or `sha256sum *` would list itself.
           {
             echo
             echo '### SHA-256'
             echo '```'
             sha256sum * | sed 's/  / /'
             echo '```'
-          } > notes.md
+          } > ../notes.md
+          cd ..
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > current.md
           cat current.md notes.md > combined.md
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file combined.md
